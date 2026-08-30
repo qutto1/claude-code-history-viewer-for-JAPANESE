@@ -99,6 +99,7 @@
   "analytics.providerDistributionMeta": "{{sessions}} sessions · {{projects}} projects",
   "analytics.providerScopeProjectTree": "Provider scope follows Project Tree provider tabs.",
   "analytics.rank": "{{rank}} rank",
+  "analytics.reasoning": "Reasoning",
   "analytics.recentActivity": "Recent 7 Days Activity",
   "analytics.recentActivityTrend": "Recent 7 Days Activity Trend",
   "analytics.remaining": "remaining",

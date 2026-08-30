@@ -12,6 +12,11 @@ import { isEmptyMessage } from "./messageHelpers";
 // measureElement — but a guess that is far too tall makes the scrollbar lurch
 // once the real heights arrive. They are sized against the compact frame
 // (a plain row is ~50px), not the roomier pre-density layout.
+//
+// The metadata line no longer stacks above the bubble — it moved into the left
+// gutter beside it — so every row with a gutter lost that ~18px. Assistant rows
+// keep more of it than the rest because their gutter is three lines tall
+// (time / model / cost) and so sets a floor of its own.
 const HEIGHT_DEFAULTS = {
   summary: 40,
   // Collapsed /compact card — its body is ~16k chars, so it must never be
@@ -20,11 +25,11 @@ const HEIGHT_DEFAULTS = {
   progress: 28,
   agentTaskGroup: 72,
   agentProgressGroup: 56,
-  toolResult: 76,
-  assistant: 56,
-  user: 48,
+  toolResult: 58,
+  assistant: 44,
+  user: 32,
   system: 40,
-  default: 48,
+  default: 32,
   // Hidden group members
   hidden: 0,
 } as const;

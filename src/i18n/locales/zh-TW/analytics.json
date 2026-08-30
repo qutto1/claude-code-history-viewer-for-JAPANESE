@@ -99,6 +99,7 @@
   "analytics.providerDistributionMeta": "{{sessions}} 個會話 • {{projects}} 個專案",
   "analytics.providerScopeProjectTree": "供應商範圍遵循專案樹中的供應商分頁。",
   "analytics.rank": "第{{rank}}名",
+  "analytics.reasoning": "推理",
   "analytics.recentActivity": "最近7天活動趨勢",
   "analytics.recentActivityTrend": "最近7天活動趨勢",
   "analytics.remaining": "剩餘",

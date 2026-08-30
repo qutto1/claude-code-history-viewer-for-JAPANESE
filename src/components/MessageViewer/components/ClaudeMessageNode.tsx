@@ -27,7 +27,7 @@ import { extractClaudeMessageContent } from "../../../utils/messageUtils";
 import { isEmptyMessage } from "../helpers/messageHelpers";
 import { isToolUseContent, isToolResultContent } from "../../../utils/typeGuards";
 import { isActionModifier } from "../../../utils/platform";
-import { MessageHeader } from "./MessageHeader";
+import { MessageGutter } from "./MessageGutter";
 import { SummaryMessage } from "./SummaryMessage";
 import type { MessageNodeProps } from "../types";
 
@@ -436,10 +436,10 @@ export const ClaudeMessageNode = React.memo(({
         )}
       >
         {CaptureHideButton}
-        <div className="max-w-4xl mx-auto">
-          <MessageHeader message={message} />
+        <div className="max-w-4xl mx-auto flex items-start gap-2">
+          <MessageGutter message={message} />
 
-          <div className="w-full">
+          <div className="w-full min-w-0 flex-1">
             {(message.type !== "assistant" || messageFilter.contentTypes.text) && (
               <MessageContentDisplay
                 content={extractClaudeMessageContent(message)}

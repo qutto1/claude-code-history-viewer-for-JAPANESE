@@ -99,6 +99,7 @@
   "analytics.providerDistributionMeta": "{{sessions}}セッション · {{projects}}プロジェクト",
   "analytics.providerScopeProjectTree": "プロバイダの範囲はプロジェクトツリーのプロバイダタブに従います。",
   "analytics.rank": "{{rank}} ランク",
+  "analytics.reasoning": "推論",
   "analytics.recentActivity": "直近7日間のアクティビティ",
   "analytics.recentActivityTrend": "最近7日間のアクティビティ推移",
   "analytics.remaining": "残り",

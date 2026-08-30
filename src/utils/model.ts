@@ -26,6 +26,17 @@ export const getShortModelName = (model: string): string => {
     return model;
   }
 
-  // Fallback: remove date suffix
-  return model.replace(/-\d{8}$/, "");
+  // Format: claude-<variant>-<major>-<minor?> with no date at all. Recent
+  // Claude Code releases stopped stamping the YYYYMMDD suffix, so most ids in
+  // a modern log fall here: claude-opus-5, claude-sonnet-4-6, claude-fable-5.
+  const datelessFormat = model.match(/^claude-([a-z]+)-(\d+)(?:-(\d+))?$/);
+  if (datelessFormat) {
+    const [, variant, major, minor] = datelessFormat;
+    return minor ? `${variant}-${major}.${minor}` : `${variant}-${major}`;
+  }
+
+  // Fallback: drop the date suffix and the vendor prefix. Callers want the
+  // variant on its own — "claude-" is the same on every row and only costs
+  // width in dense UI.
+  return model.replace(/-\d{8}$/, "").replace(/^claude-/, "");
 };

@@ -9,7 +9,7 @@ export { MessageViewer } from "./MessageViewer/MessageViewer";
 export type {
   MessageViewerProps,
   MessageNodeProps,
-  MessageHeaderProps,
+  MessageGutterProps,
   SummaryMessageProps,
   AgentProgressEntry,
   AgentProgressGroup,

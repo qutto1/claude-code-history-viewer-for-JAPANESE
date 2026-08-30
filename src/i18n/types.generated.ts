@@ -5,8 +5,8 @@
  * 직접 수정하지 마세요.
  *
  * 생성 명령: pnpm run generate:i18n-types
- * 생성 시간: 2026-08-30T01:16:37.712Z
- * 총 키 개수: 1936
+ * 생성 시간: 2026-08-30T14:51:08.668Z
+ * 총 키 개수: 1941
  * Namespace 수: 11
  */
 
@@ -230,7 +230,7 @@ export type CommonKeys =
   | 'time.yesterday';
 
 /**
- * analytics namespace의 번역 키 (182개)
+ * analytics namespace의 번역 키 (183개)
  * 파일: locales/{lang}/analytics.json
  */
 export type AnalyticsKeys =
@@ -337,6 +337,7 @@ export type AnalyticsKeys =
   | 'analytics.providerDistributionMeta'
   | 'analytics.providerScopeProjectTree'
   | 'analytics.rank'
+  | 'analytics.reasoning'
   | 'analytics.recentActivity'
   | 'analytics.recentActivityTrend'
   | 'analytics.remaining'
@@ -1450,7 +1451,7 @@ export type MessageKeys =
   | 'navigator.userOnly';
 
 /**
- * renderers namespace의 번역 키 (394개)
+ * renderers namespace의 번역 키 (398개)
  * 파일: locales/{lang}/renderers.json
  */
 export type RenderersKeys =
@@ -1485,13 +1486,17 @@ export type RenderersKeys =
   | 'agentTaskGroup.transcript'
   | 'assistantMessageDetails.cacheCreation'
   | 'assistantMessageDetails.cacheRead'
+  | 'assistantMessageDetails.cost'
   | 'assistantMessageDetails.costEstimated'
+  | 'assistantMessageDetails.duration'
   | 'assistantMessageDetails.estimated'
   | 'assistantMessageDetails.input'
   | 'assistantMessageDetails.model'
   | 'assistantMessageDetails.output'
+  | 'assistantMessageDetails.reasoning'
   | 'assistantMessageDetails.tier'
   | 'assistantMessageDetails.tokenUsage'
+  | 'assistantMessageDetails.tokenUsageLabel'
   | 'bashCodeExecutionToolResultRenderer.error'
   | 'bashCodeExecutionToolResultRenderer.noOutput'
   | 'bashCodeExecutionToolResultRenderer.title'
@@ -2177,6 +2182,7 @@ export type TranslationKey =
   | 'analytics.providerDistributionMeta'
   | 'analytics.providerScopeProjectTree'
   | 'analytics.rank'
+  | 'analytics.reasoning'
   | 'analytics.recentActivity'
   | 'analytics.recentActivityTrend'
   | 'analytics.remaining'
@@ -2258,13 +2264,17 @@ export type TranslationKey =
   | 'analytics.weeklyActivity'
   | 'assistantMessageDetails.cacheCreation'
   | 'assistantMessageDetails.cacheRead'
+  | 'assistantMessageDetails.cost'
   | 'assistantMessageDetails.costEstimated'
+  | 'assistantMessageDetails.duration'
   | 'assistantMessageDetails.estimated'
   | 'assistantMessageDetails.input'
   | 'assistantMessageDetails.model'
   | 'assistantMessageDetails.output'
+  | 'assistantMessageDetails.reasoning'
   | 'assistantMessageDetails.tier'
   | 'assistantMessageDetails.tokenUsage'
+  | 'assistantMessageDetails.tokenUsageLabel'
   | 'bashCodeExecutionToolResultRenderer.error'
   | 'bashCodeExecutionToolResultRenderer.noOutput'
   | 'bashCodeExecutionToolResultRenderer.title'

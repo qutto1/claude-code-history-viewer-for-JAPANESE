@@ -52,7 +52,7 @@ export interface MessageNodeProps {
   onRangeSelect?: (uuid: string, modifiers: { shift: boolean; cmdOrCtrl: boolean }) => void;
 }
 
-export interface MessageHeaderProps {
+export interface MessageGutterProps {
   message: ClaudeMessage;
 }
 
