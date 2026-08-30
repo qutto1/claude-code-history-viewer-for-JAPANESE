@@ -36,6 +36,10 @@ const CAPTURE_HOVER_BG = "group-hover/capture:bg-red-500/5 group-hover/capture:r
 // Selection highlight style
 const SELECTED_BG = "bg-blue-500/10 ring-1 ring-blue-500/40";
 
+// Message frame padding — single source of truth so density stays consistent
+// across every branch below (task groups, progress, system, and normal rows).
+const NODE_FRAME = "relative w-full px-1.5 md:px-2.5 py-0.5 transition-all duration-200";
+
 // Click priority: interactive elements take precedence over capture selection
 const INTERACTIVE_SELECTOR = "button, a, summary, input, select, textarea, [role='button']";
 
@@ -113,7 +117,7 @@ export const ClaudeMessageNode = React.memo(({
         onHideMessage(message.uuid);
       }}
       className={cn(
-        "absolute top-3 right-3 z-10",
+        "absolute top-1 right-1 z-10",
         "flex items-center justify-center",
         "w-7 h-7 rounded-lg",
         // Glass morphism effect
@@ -186,7 +190,7 @@ export const ClaudeMessageNode = React.memo(({
           data-message-uuid={message.uuid}
           onClick={handleSelectionClick}
           className={cn(
-            "relative w-full px-2 md:px-4 py-2 transition-all duration-200",
+            NODE_FRAME,
             isCaptureMode && !isSelected && CAPTURE_HOVER_BG,
             selectionHighlight,
             selectionCursor
@@ -209,7 +213,7 @@ export const ClaudeMessageNode = React.memo(({
           data-message-uuid={message.uuid}
           onClick={handleSelectionClick}
           className={cn(
-            "relative w-full px-2 md:px-4 py-2 transition-all duration-200",
+            NODE_FRAME,
             isCaptureMode && !isSelected && CAPTURE_HOVER_BG,
             selectionHighlight,
             selectionCursor
@@ -235,7 +239,7 @@ export const ClaudeMessageNode = React.memo(({
           data-message-uuid={message.uuid}
           onClick={handleSelectionClick}
           className={cn(
-            "relative w-full px-2 md:px-4 py-2 transition-all duration-200",
+            NODE_FRAME,
             isCaptureMode && !isSelected && CAPTURE_HOVER_BG,
             selectionHighlight,
             selectionCursor
@@ -286,7 +290,7 @@ export const ClaudeMessageNode = React.memo(({
           data-message-uuid={message.uuid}
           onClick={handleSelectionClick}
           className={cn(
-            "relative w-full px-2 md:px-4 py-2 transition-all duration-200",
+            NODE_FRAME,
             isCaptureMode && !isSelected && CAPTURE_HOVER_BG,
             selectionHighlight,
             selectionCursor
@@ -313,7 +317,7 @@ export const ClaudeMessageNode = React.memo(({
           data-message-uuid={message.uuid}
           onClick={handleSelectionClick}
           className={cn(
-            "relative w-full px-2 md:px-4 py-1 transition-all duration-200",
+            NODE_FRAME,
             isCaptureMode && !isSelected && CAPTURE_HOVER_BG,
             selectionHighlight,
             selectionCursor
@@ -341,7 +345,7 @@ export const ClaudeMessageNode = React.memo(({
           data-message-uuid={message.uuid}
           onClick={handleSelectionClick}
           className={cn(
-            "relative w-full px-2 md:px-4 py-1 transition-all duration-200",
+            NODE_FRAME,
             isCurrentMatch && "bg-highlight-current ring-2 ring-warning",
             isMatch && !isCurrentMatch && "bg-highlight",
             isCaptureMode && !isCurrentMatch && !isMatch && !isSelected && CAPTURE_HOVER_BG,
@@ -384,7 +388,7 @@ export const ClaudeMessageNode = React.memo(({
         data-message-uuid={message.uuid}
         onClick={handleSelectionClick}
         className={cn(
-          "relative w-full px-2 md:px-4 py-2 transition-all duration-200",
+          NODE_FRAME,
           message.isSidechain && !isInSubagent && "bg-muted",
           // Search highlight
           isCurrentMatch && "bg-highlight-current ring-2 ring-warning",
@@ -413,7 +417,7 @@ export const ClaudeMessageNode = React.memo(({
 
             {message.content &&
               Array.isArray(message.content) && (
-                <div className="mb-2">
+                <div className="mb-1">
                   <ClaudeContentArrayRenderer
                     content={message.content}
                     searchQuery={searchQuery}

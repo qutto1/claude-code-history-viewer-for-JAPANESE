@@ -19,8 +19,8 @@ export const ClaudeToolUseDisplay: React.FC<ClaudeToolUseDisplayProps> = ({
   const toolName = toolUse.name || toolUse.tool || t("claudeToolUseDisplay.unknownTool");
 
   return (
-    <div className={cn("mt-2 bg-muted border border-border", layout.containerPadding, layout.rounded)}>
-      <div className={cn("flex items-center mb-2", layout.iconSpacing)}>
+    <div className={cn("mt-1 bg-muted border border-border", layout.containerPadding, layout.rounded)}>
+      <div className={cn("flex items-center mb-1", layout.iconSpacing)}>
         <ToolIcon
           toolName={toolName as string}
           className="text-muted-foreground"

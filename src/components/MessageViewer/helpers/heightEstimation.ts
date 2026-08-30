@@ -9,15 +9,15 @@ import { isEmptyMessage } from "./messageHelpers";
 
 // Default heights by message type (in pixels)
 const HEIGHT_DEFAULTS = {
-  summary: 80,
-  progress: 60,
-  agentTaskGroup: 150,
-  agentProgressGroup: 120,
-  toolResult: 200,
-  assistant: 180,
-  user: 120,
-  system: 100,
-  default: 120,
+  summary: 56,
+  progress: 40,
+  agentTaskGroup: 130,
+  agentProgressGroup: 100,
+  toolResult: 176,
+  assistant: 150,
+  user: 92,
+  system: 76,
+  default: 92,
   // Hidden group members
   hidden: 0,
 } as const;
@@ -139,7 +139,7 @@ export function estimateMessageHeight(
 
   // Date divider has fixed height
   if (item.type === "date-divider") {
-    return 36;
+    return 24;
   }
 
   const { message, agentTaskGroup, agentProgressGroup } = item;

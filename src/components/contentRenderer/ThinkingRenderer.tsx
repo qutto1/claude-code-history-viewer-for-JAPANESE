@@ -38,7 +38,7 @@ export const ThinkingRenderer = memo(function ThinkingRenderer({
   const hasMore = thinking.length > firstLine.length || thinking.includes("\n");
 
   return (
-    <div className={cn("bg-thinking border border-thinking-border mt-2 overflow-hidden", layout.rounded)}>
+    <div className={cn("bg-thinking border border-thinking-border mt-1 overflow-hidden", layout.rounded)}>
       <button
         type="button"
         onClick={() => setIsExpanded(prev => !prev)}

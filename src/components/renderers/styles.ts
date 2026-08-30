@@ -189,26 +189,26 @@ export function getVariantStyles(variant: RendererVariant): VariantStyles {
  * </div>
  *
  * Size Reference:
- * - containerPadding: 10px all sides
- * - headerPadding: 10px horizontal, 6px vertical
+ * - containerPadding: 6px all sides
+ * - headerPadding: 8px horizontal, 2px vertical
  * - iconGap: 6px
  * - iconSize: 16x16px (standard)
  * - iconSizeSmall: 12x12px (badges)
  * - titleText/bodyText/smallText: 12px
- * - headerHeight: 32px minimum (grows when content wraps)
+ * - headerHeight: 24px minimum (grows when content wraps)
  * - rounded: 6px border radius
  * - codeMaxHeight: 256px
  * - contentMaxHeight: 384px
  */
 export const layout = {
   /** Container padding */
-  containerPadding: "p-2.5",
+  containerPadding: "p-1.5",
   /** Header padding (for collapsible headers) */
-  headerPadding: "px-2.5 py-1.5",
-  /** Header minimum height (32px, grows when content wraps) */
-  headerHeight: "min-h-8",
+  headerPadding: "px-2 py-0.5",
+  /** Header minimum height (24px, grows when content wraps) */
+  headerHeight: "min-h-6",
   /** Content padding (inside expanded content) */
-  contentPadding: "px-2.5 pb-2.5",
+  contentPadding: "px-2 pb-1.5",
   /** Gap between icon and text */
   iconGap: "gap-1.5",
   /** Alternative spacing using space-x */
@@ -244,7 +244,7 @@ export const layoutComposite = {
   /** Standard renderer container */
   container: `${layout.rounded} ${layout.containerPadding} border`,
   /** Header row with icon and title */
-  headerRow: `flex items-center ${layout.iconSpacing} mb-2`,
+  headerRow: `flex items-center ${layout.iconSpacing} mb-1`,
   /** Collapsible header button */
   headerButton: `w-full flex items-center justify-between ${layout.headerPadding} text-left hover:bg-muted/50 transition-colors`,
   /** Content area inside renderer */

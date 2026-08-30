@@ -20,7 +20,7 @@ export const DateDivider: React.FC<DateDividerProps> = React.memo(
     return (
       <div
         className={cn(
-          "flex items-center justify-center py-1.5",
+          "flex items-center justify-center py-0.5",
           "select-none pointer-events-none"
         )}
         role="separator"

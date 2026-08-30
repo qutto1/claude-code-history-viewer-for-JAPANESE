@@ -50,7 +50,7 @@ export const MessageHeader: React.FC<MessageHeaderProps> = ({ message }) => {
 
   return (
     <div className={cn(
-      "flex items-center mb-1 text-xs text-muted-foreground",
+      "flex items-center mb-0.5 text-xs text-muted-foreground",
       isLeftAligned ? "justify-between" : "justify-end"
     )}>
       <div className="flex items-center gap-1.5">

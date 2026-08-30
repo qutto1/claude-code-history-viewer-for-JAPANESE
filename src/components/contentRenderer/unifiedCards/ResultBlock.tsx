@@ -17,10 +17,10 @@ export function ResultBlock({
 }) {
   const { t } = useTranslation();
   if (results.length === 0) return (
-    <div className={cn(layout.smallText, "text-muted-foreground italic mt-2")}>{t("common.pending")}</div>
+    <div className={cn(layout.smallText, "text-muted-foreground italic mt-1")}>{t("common.pending")}</div>
   );
   return (
-    <div className="mt-2 space-y-2">
+    <div className="mt-1 space-y-1">
       {results.map((result, idx) => {
         const content = result.content ?? result;
         return (

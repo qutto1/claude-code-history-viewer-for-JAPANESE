@@ -17,11 +17,11 @@ export const SummaryMessage: React.FC<SummaryMessageProps> = ({ content, timesta
   const { t } = useTranslation();
 
   return (
-    <div className="rounded-md border mx-4 my-2 bg-info/10 border-info/30">
+    <div className="rounded-md border mx-2 my-0.5 bg-info/10 border-info/30">
       <button
         onClick={() => setIsExpanded(prev => !prev)}
         className={cn(
-          "w-full flex items-center gap-1.5 px-3 py-2 h-8",
+          "w-full flex items-center gap-1.5 px-2 py-1 h-6",
           "text-left hover:bg-info/20 transition-colors rounded-md"
         )}
       >
@@ -41,7 +41,7 @@ export const SummaryMessage: React.FC<SummaryMessageProps> = ({ content, timesta
       </button>
 
       {isExpanded && (
-        <div className="px-3 pb-3 text-sm text-info-foreground">
+        <div className="px-2 pb-2 text-sm text-info-foreground">
           {content}
         </div>
       )}

@@ -83,7 +83,7 @@ export const SessionItem: React.FC<SessionItemProps> = ({
   return (
     <div
       className={cn(
-        "group w-full flex flex-col gap-1.5 py-2.5 px-3 rounded-lg",
+        "group w-full flex flex-col gap-0.5 py-1 px-3 rounded-lg",
         "text-left transition-all duration-300",
         "hover:bg-accent/8",
         isSelectionMode && "cursor-pointer select-none",
@@ -138,7 +138,7 @@ export const SessionItem: React.FC<SessionItemProps> = ({
           {isSelectionMode ? (
             <span
               className={cn(
-                "text-xs leading-relaxed line-clamp-2 flex-1",
+                "text-xs leading-snug line-clamp-2 flex-1",
                 editing.isNamed ? "font-bold" : "italic opacity-70",
                 highlighted ? "text-accent" : "text-sidebar-foreground/70"
               )}

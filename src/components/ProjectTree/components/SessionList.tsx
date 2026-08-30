@@ -18,13 +18,15 @@ import type { SessionListProps } from "../types";
 import type { ClaudeSession } from "../../../types";
 import type { SessionSortOrder, SessionEntrypointFilter } from "@/types/metadata.types";
 
-// SessionItem fixed row height. Sized to fit a 2-line wrapped name:
-//   py-2.5 (20px) + name 2 × text-xs/leading-relaxed (39px)
-//   + gap-1.5 (6px) + meta text-2xs (15px) ≈ 80px → 88px with safety margin.
+// SessionItem row height at fontScale = 100%. Sized to fit a 2-line wrapped name:
+//   py-1 (8px) + name 2 x text-xs/leading-snug (35.75px)
+//   + gap-0.5 (2px) + meta text-2xs (15px) = 60.75px -> 64px with safety margin.
 // Bumping this matters because react-window's FixedSizeList stacks rows at
 // `index * height`; a row taller than the height visually overlaps the next
 // row (#284). line-clamp-2 caps the worst case at 2 lines.
-const SESSION_ITEM_HEIGHT = 88;
+// The row scales with --app-font-scale (90-130%), so the effective height is
+// derived from this base at render time rather than hard-coded.
+const SESSION_ITEM_BASE_HEIGHT = 64;
 // Virtual scroll을 적용할 최소 세션 수
 const VIRTUALIZATION_THRESHOLD = 20;
 // Virtual list의 최대 표시 높이
@@ -234,6 +236,7 @@ export const SessionList: React.FC<SessionListProps> = ({
     setSessionEntrypointFilter,
     getSessionDisplayName,
   } = useAppStore();
+  const fontScale = useAppStore((s) => s.fontScale);
   const isSelectionMode = useAppStore((s) => s.isSessionSelectionMode);
   const sessionSelectionIds = useAppStore((s) => s.sessionSelectionIds);
   const toggleSessionSelectionMode = useAppStore((s) => s.toggleSessionSelectionMode);
@@ -449,20 +452,26 @@ export const SessionList: React.FC<SessionListProps> = ({
     ]
   );
 
+  // Row height follows the app font scale so rows never overlap at 130% (#284)
+  const itemHeight = useMemo(
+    () => Math.ceil(SESSION_ITEM_BASE_HEIGHT * (fontScale / 100)),
+    [fontScale]
+  );
+
   // 리스트 높이 계산
   const listHeight = useMemo(() => {
-    const totalHeight = filteredAndSortedSessions.length * SESSION_ITEM_HEIGHT;
+    const totalHeight = filteredAndSortedSessions.length * itemHeight;
     return Math.min(totalHeight, MAX_LIST_HEIGHT);
-  }, [filteredAndSortedSessions.length]);
+  }, [filteredAndSortedSessions.length, itemHeight]);
 
   // Virtual scroll 사용 여부
   const useVirtualScroll = filteredAndSortedSessions.length >= VIRTUALIZATION_THRESHOLD;
 
   if (isLoading) {
     return (
-      <div className={cn(containerClass, borderClass, "space-y-2 py-2")}>
+      <div className={cn(containerClass, borderClass, "space-y-0.5 py-2")}>
         {[1, 2, isWorktree || isMain ? 0 : 3].filter(Boolean).map((i) => (
-          <div key={i} className="flex items-center gap-2.5 py-2 px-3">
+          <div key={i} className="flex items-center gap-2.5 py-1 px-3">
             <Skeleton variant="circular" className="w-5 h-5" />
             <div className="flex-1 space-y-1.5">
               <Skeleton className="h-3 w-3/4" />
@@ -490,7 +499,7 @@ export const SessionList: React.FC<SessionListProps> = ({
         {selectionBar}
 
         {/* Session List */}
-        <div className="space-y-1 py-2">
+        <div className="space-y-0.5 py-2">
           {filteredAndSortedSessions.length === 0 ? (
             <div className="py-2 text-2xs text-muted-foreground text-center">
               {t("session.filter.noResults", "No matching sessions")}
@@ -533,7 +542,7 @@ export const SessionList: React.FC<SessionListProps> = ({
           <List
             height={listHeight}
             itemCount={filteredAndSortedSessions.length}
-            itemSize={SESSION_ITEM_HEIGHT}
+            itemSize={itemHeight}
             width="100%"
             itemData={itemData}
             overscanCount={5}

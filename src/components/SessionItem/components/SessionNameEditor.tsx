@@ -141,7 +141,7 @@ export const SessionNameEditor: React.FC<SessionNameEditorProps> = ({
     <>
       <span
         className={cn(
-          "text-xs leading-relaxed line-clamp-2 transition-colors duration-300 flex-1 cursor-pointer flex items-start gap-1",
+          "text-xs leading-snug line-clamp-2 transition-colors duration-300 flex-1 cursor-pointer flex items-start gap-1",
           readOnly && "cursor-default",
           isSelected ? "text-accent font-medium" : "text-sidebar-foreground/70"
         )}
