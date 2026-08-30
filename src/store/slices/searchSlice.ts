@@ -17,6 +17,7 @@ import {
   type FullAppStore,
   createEmptySearchState,
 } from "./types";
+import { applyMessageDisplayFilter } from "../../components/MessageViewer/helpers/messageDisplayFilter";
 import { getWslSearchableProviderIds, hasNonDefaultProvider } from "../../utils/providers";
 
 // ============================================================================
@@ -168,7 +169,7 @@ export const createSearchSlice: StateCreator<
       // Search over the COMPLETE session, not just the loaded window —
       // matches in unloaded older pages must be findable. The fetch is
       // cached per session in the message slice.
-      const searchableMessages = await get().fetchFullSessionMessages();
+      const fullMessages = await get().fetchFullSessionMessages();
 
       // Session-switch guard: the full fetch resolved for a session the
       // user has already left.
@@ -176,17 +177,30 @@ export const createSearchSlice: StateCreator<
         return;
       }
 
-      // Search strategy: Worker (async) > linear fallback (sync)
+      // Only search what the user can actually see. Rows dropped by the
+      // role/content-type toggles, and blocks hidden inside a visible row,
+      // must not produce matches — a hit the renderer cannot highlight looks
+      // like a broken search box.
+      const { messageFilter } = get();
+      const filterActive = get().isMessageFilterActive();
+      const searchableMessages = filterActive
+        ? applyMessageDisplayFilter(fullMessages, messageFilter)
+        : fullMessages;
+
+      // Search strategy: Worker (async) > linear fallback (sync).
+      // The Worker index is built from the unfiltered session, so it is only
+      // usable while no filter is active; otherwise fall back to the linear
+      // scan, which applies the filter per message.
       let searchResults: Array<{ messageUuid: string; messageIndex: number; matchIndex: number; matchCount: number }>;
 
-      if (isSearchIndexReady()) {
+      if (!filterActive && isSearchIndexReady()) {
         // Worker index is ready — use fast async search
         searchResults = await searchMessagesAsync(query, filterType);
       } else {
         // Index not ready — use linear search (instant, ~100-200ms for 50k messages)
-        searchResults = linearSearchMessages(searchableMessages, query, filterType);
+        searchResults = linearSearchMessages(searchableMessages, query, filterType, messageFilter);
         // Trigger background Worker index build for future searches
-        buildSearchIndex(searchableMessages);
+        if (!filterActive) buildSearchIndex(searchableMessages);
       }
 
       // Drop stale results: a newer search has been started while this one

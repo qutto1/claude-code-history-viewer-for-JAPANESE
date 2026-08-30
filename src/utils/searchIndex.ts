@@ -2,6 +2,7 @@ import FlexSearch from "flexsearch";
 import type { Document as FlexSearchDocument } from "flexsearch";
 import type { ClaudeMessage } from "../types";
 import type { SearchFilterType } from "../store/useAppStore";
+import type { MessageFilter, MessageFilterContentTypes } from "../store/slices/filterSlice";
 
 // FlexSearch document shape used by this module's content / toolId indexes
 type SearchDoc = { uuid: string; messageIndex: number; text: string };
@@ -17,6 +18,22 @@ const hasStringProperty = (obj: Record<string, unknown>, key: string): boolean =
 };
 
 // 검색 가능한 텍스트 추출 (content 검색용)
+// Content block types the "tool calls" toggle hides in the renderer. Kept in
+// sync with the skipToolCalls branches in ClaudeContentArrayRenderer.
+const TOOL_CONTENT_TYPES = new Set<string>([
+  "tool_use",
+  "tool_result",
+  "server_tool_use",
+  "web_search_tool_result",
+  "mcp_tool_use",
+  "mcp_tool_result",
+  "web_fetch_tool_result",
+  "code_execution_tool_result",
+  "bash_code_execution_tool_result",
+  "text_editor_code_execution_tool_result",
+  "tool_search_tool_result",
+]);
+
 const MAX_TEXT_LENGTH = 10000; // 최대 10KB만 인덱싱 (텍스트용)
 const MAX_INPUT_LENGTH = 5000; // tool_use.input 값 인덱싱 상한 (도구당)
 
@@ -49,8 +66,14 @@ const collectInputValues = (
   }
 };
 
-const extractSearchableText = (message: ClaudeMessage): string => {
+const extractSearchableText = (
+  message: ClaudeMessage,
+  contentTypeFilter?: MessageFilterContentTypes
+): string => {
   const parts: string[] = [];
+  // The renderer only skips blocks on assistant messages (see ClaudeMessageNode),
+  // so gating anything else here would hide text that is plainly on screen.
+  const ct = message.type === "assistant" ? contentTypeFilter : undefined;
 
   try {
     // content 추출
@@ -69,12 +92,21 @@ const extractSearchableText = (message: ClaudeMessage): string => {
               continue;
             }
 
+            // Tool blocks are hidden by the toolCalls toggle, so keep them out of
+            // the index too — otherwise a hit lands on a block with no <mark>.
+            if (ct?.toolCalls === false && itemType && TOOL_CONTENT_TYPES.has(itemType)) {
+              continue;
+            }
+            if (ct?.commands === false && itemType === "command") {
+              continue;
+            }
+
             // text content (길이 제한)
-            if (hasStringProperty(item, "text")) {
+            if (ct?.text !== false && hasStringProperty(item, "text")) {
               parts.push((item.text as string).slice(0, MAX_TEXT_LENGTH));
             }
             // thinking content (길이 제한)
-            if (hasStringProperty(item, "thinking")) {
+            if (ct?.thinking !== false && hasStringProperty(item, "thinking")) {
               parts.push((item.thinking as string).slice(0, MAX_TEXT_LENGTH));
             }
             // tool_use: name + input values (file_path, command, query 등) (#429)
@@ -178,6 +210,7 @@ const extractSearchableText = (message: ClaudeMessage): string => {
 
     // toolUse name 추출
     if (
+      ct?.toolCalls !== false &&
       message.type === "assistant" &&
       isRecord(message.toolUse) &&
       hasStringProperty(message.toolUse, "name")
@@ -188,6 +221,7 @@ const extractSearchableText = (message: ClaudeMessage): string => {
     // toolUseResult 추출 (큰 내용은 처음 부분만 인덱싱)
     const MAX_CONTENT_LENGTH = 5000; // 최대 5KB만 인덱싱
     if (
+      ct?.toolCalls !== false &&
       (message.type === "user" || message.type === "assistant") &&
       message.toolUseResult
     ) {
@@ -683,10 +717,12 @@ export const isSearchIndexReady = (): boolean => {
 export const linearSearchMessages = (
   messages: ClaudeMessage[],
   query: string,
-  filterType: SearchFilterType = "content"
+  filterType: SearchFilterType = "content",
+  messageFilter?: MessageFilter
 ): SearchResult[] => {
   if (!query.trim()) return [];
   const lowerQuery = query.toLowerCase();
+  const contentTypes = messageFilter?.contentTypes;
 
   const results: SearchResult[] = [];
 
@@ -696,7 +732,7 @@ export const linearSearchMessages = (
 
     const text = filterType === "toolId"
       ? extractToolIds(message)
-      : extractSearchableText(message);
+      : extractSearchableText(message, contentTypes);
 
     if (!text) continue;
     const lowerText = text.toLowerCase();

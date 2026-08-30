@@ -193,3 +193,55 @@ describe("isSearchIndexReady / clearSearchIndex", () => {
     expect(isSearchIndexReady()).toBe(false);
   });
 });
+
+describe("linearSearchMessages with a content-type filter", () => {
+  const allOn = {
+    roles: { user: true, assistant: true },
+    contentTypes: { text: true, thinking: true, toolCalls: true, commands: true, parallelTasks: true },
+  };
+  const filter = (overrides: Partial<typeof allOn.contentTypes> & { user?: boolean; assistant?: boolean } = {}) => {
+    const { user, assistant, ...contentTypes } = overrides;
+    return {
+      roles: { user: user ?? true, assistant: assistant ?? true },
+      contentTypes: { ...allOn.contentTypes, ...contentTypes },
+    };
+  };
+
+  const thinkingMsg = createMessage({
+    uuid: "f-1",
+    type: "assistant",
+    content: [{ type: "thinking", thinking: "secret-reasoning-token" }],
+  });
+  const toolMsg = createMessage({
+    uuid: "f-2",
+    type: "assistant",
+    content: [{ type: "tool_use", name: "Bash", input: { command: "grep-needle-token" } }],
+  });
+  const userMsg = createMessage({ uuid: "f-3", type: "user", content: "user-only-token" });
+
+  it("skips thinking blocks when the thinking toggle is off", () => {
+    expect(linearSearchMessages([thinkingMsg], "secret-reasoning-token", "content", allOn).length).toBe(1);
+    expect(
+      linearSearchMessages([thinkingMsg], "secret-reasoning-token", "content", filter({ thinking: false })).length
+    ).toBe(0);
+  });
+
+  it("skips tool blocks when the tool-calls toggle is off", () => {
+    expect(linearSearchMessages([toolMsg], "grep-needle-token", "content", allOn).length).toBe(1);
+    expect(
+      linearSearchMessages([toolMsg], "grep-needle-token", "content", filter({ toolCalls: false })).length
+    ).toBe(0);
+  });
+
+  it("does not gate non-assistant messages, which the renderer never skips", () => {
+    // A user message stays searchable even with every content toggle off,
+    // because ClaudeMessageNode only applies skips to assistant messages.
+    const everythingOff = filter({ text: false, thinking: false, toolCalls: false, commands: false });
+    expect(linearSearchMessages([userMsg], "user-only-token", "content", everythingOff).length).toBe(1);
+  });
+
+  it("behaves like the unfiltered search when no filter is passed", () => {
+    expect(linearSearchMessages([thinkingMsg], "secret-reasoning-token").length).toBe(1);
+    expect(linearSearchMessages([toolMsg], "grep-needle-token").length).toBe(1);
+  });
+});

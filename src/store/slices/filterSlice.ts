@@ -36,6 +36,17 @@ const defaultMessageFilter = (): MessageFilter => ({
 const isBool = (value: unknown): value is boolean => typeof value === "boolean";
 
 /**
+ * Re-run the active session search after a visibility toggle changes.
+ * The search only covers what is on screen, so its matches go stale the
+ * moment a role or content type is switched on or off.
+ * Optional-called because filterSlice is instantiated standalone in tests.
+ */
+const refreshActiveSearch = (get: () => FullAppStore) => {
+    const query = get().sessionSearch?.query;
+    if (query) get().setSessionSearchQuery?.(query);
+};
+
+/**
  * Load the persisted message filter, validating every field. Any missing or
  * malformed field falls back to the default so an older/corrupt payload can never
  * break the toolbar. localStorage access is wrapped in try/catch per repo convention.
@@ -163,6 +174,7 @@ export const createFilterSlice: StateCreator<
         };
         persistMessageFilter(next);
         set({ messageFilter: next });
+        refreshActiveSearch(get);
     },
 
     toggleContentType: (contentType) => {
@@ -176,12 +188,14 @@ export const createFilterSlice: StateCreator<
         };
         persistMessageFilter(next);
         set({ messageFilter: next });
+        refreshActiveSearch(get);
     },
 
     resetMessageFilter: () => {
         const next = defaultMessageFilter();
         persistMessageFilter(next);
         set({ messageFilter: next });
+        refreshActiveSearch(get);
     },
 
     isMessageFilterActive: () => {
