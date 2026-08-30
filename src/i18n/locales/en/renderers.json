@@ -115,6 +115,8 @@
   "commandRenderer.status": "Status:",
   "commandRenderer.systemNote": "System Note",
   "commandRenderer.unknownContentType": "Unknown content type",
+  "compactSummaryRenderer.preview": "{{count}} characters carried over",
+  "compactSummaryRenderer.title": "Compacted context",
   "contentArray.cacheCreation": "Cache Creation:",
   "contentArray.cacheRead": "Cache Read:",
   "contentArray.claudeApiResponse": "Claude API Response",

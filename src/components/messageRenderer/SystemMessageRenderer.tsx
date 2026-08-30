@@ -23,10 +23,13 @@ interface HookInfo {
   error?: string;
 }
 
-// Compact metadata structure
+// Compact metadata structure. The backend forwards the record verbatim, so
+// these fields are all present in practice even though each is optional.
 interface CompactMetadata {
   trigger?: string;
   preTokens?: number;
+  postTokens?: number;
+  durationMs?: number;
 }
 
 type SystemSubtype = "stop_hook_summary" | "turn_duration" | "compact_boundary" | "microcompact_boundary" | "local_command" | "system_prompt";
@@ -233,15 +236,27 @@ export const SystemMessageRenderer = memo(function SystemMessageRenderer({
           </div>
           {compactMetadata?.preTokens && (
             <span className="text-muted-foreground font-mono">
-              {compactMetadata.preTokens.toLocaleString()} tokens
+              {compactMetadata.preTokens.toLocaleString()}
+              {compactMetadata.postTokens != null && (
+                <> &rarr; {compactMetadata.postTokens.toLocaleString()}</>
+              )}{" "}
+              tokens
             </span>
           )}
         </div>
-        {compactMetadata?.trigger && (
+        {(compactMetadata?.trigger || compactMetadata?.durationMs != null) && (
           <div className="mt-1 text-muted-foreground">
-            {t("systemMessageRenderer.trigger", { defaultValue: "Trigger" })}: {compactMetadata.trigger}
+            {compactMetadata?.trigger && (
+              <>
+                {t("systemMessageRenderer.trigger", { defaultValue: "Trigger" })}: {compactMetadata.trigger}
+              </>
+            )}
+            {compactMetadata?.durationMs != null && (
+              <span className="ml-2 font-mono">{formatDuration(compactMetadata.durationMs)}</span>
+            )}
           </div>
         )}
+        {content && <div className="mt-1 text-muted-foreground">{content}</div>}
       </div>
     );
   }

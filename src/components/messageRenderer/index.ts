@@ -7,5 +7,6 @@ export { FileHistorySnapshotRenderer } from "./FileHistorySnapshotRenderer";
 export { ProgressRenderer } from "./ProgressRenderer";
 export { QueueOperationRenderer } from "./QueueOperationRenderer";
 export { SystemMessageRenderer } from "./SystemMessageRenderer";
+export { CompactSummaryRenderer } from "./CompactSummaryRenderer";
 export { SummaryMessageRenderer } from "./SummaryMessageRenderer";
 export { AgentProgressGroupRenderer } from "./AgentProgressGroupRenderer";

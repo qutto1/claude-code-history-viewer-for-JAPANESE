@@ -20,6 +20,7 @@ import {
   AgentProgressGroupRenderer,
   FileHistorySnapshotRenderer,
   SystemMessageRenderer,
+  CompactSummaryRenderer,
 } from "../../messageRenderer";
 import { AgentTaskGroupRenderer, TaskOperationGroupRenderer } from "../../toolResultRenderer";
 import { extractClaudeMessageContent } from "../../../utils/messageUtils";
@@ -367,6 +368,40 @@ export const ClaudeMessageNode = React.memo(({
               compactMetadata={message.compactMetadata}
               microcompactMetadata={message.microcompactMetadata}
               expandKey={message.uuid}
+            />
+          </div>
+        </div>
+      </ExpandKeyProvider>
+    );
+  }
+
+  // The /compact summary is a synthetic user turn carrying the whole
+  // rolled-over context. The normal chat bubble clips it to three plain-text
+  // lines, so give it a full-width collapsible card instead.
+  if (message.type === "user" && message.isCompactSummary) {
+    const compactContent = extractClaudeMessageContent(message) ?? "";
+    return (
+      <ExpandKeyProvider value={message.uuid}>
+        <div
+          data-message-uuid={message.uuid}
+          onClick={handleSelectionClick}
+          className={cn(
+            NODE_FRAME,
+            isCurrentMatch && "bg-highlight-current ring-2 ring-warning",
+            isMatch && !isCurrentMatch && "bg-highlight",
+            isCaptureMode && !isCurrentMatch && !isMatch && !isSelected && CAPTURE_HOVER_BG,
+            selectionHighlight,
+            selectionCursor
+          )}
+        >
+          {CaptureHideButton}
+          <div className="max-w-4xl mx-auto">
+            <CompactSummaryRenderer
+              content={compactContent}
+              timestamp={message.timestamp}
+              searchQuery={searchQuery}
+              isCurrentMatch={isCurrentMatch}
+              currentMatchIndex={currentMatchIndex}
             />
           </div>
         </div>

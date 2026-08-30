@@ -115,6 +115,8 @@
   "commandRenderer.status": "ステータス:",
   "commandRenderer.systemNote": "システムノート",
   "commandRenderer.unknownContentType": "不明なコンテンツタイプ",
+  "compactSummaryRenderer.preview": "{{count}} 文字を引き継ぎ",
+  "compactSummaryRenderer.title": "圧縮されたコンテキスト",
   "contentArray.cacheCreation": "キャッシュ作成:",
   "contentArray.cacheRead": "キャッシュ読み取り:",
   "contentArray.claudeApiResponse": "Claude API レスポンス",

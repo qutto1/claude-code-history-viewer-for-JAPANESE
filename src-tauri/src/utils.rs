@@ -656,6 +656,7 @@ pub fn build_provider_message(
         prevented_continuation: None,
         compact_metadata: None,
         microcompact_metadata: None,
+        is_compact_summary: None,
         provider: Some(provider.to_string()),
     }
 }

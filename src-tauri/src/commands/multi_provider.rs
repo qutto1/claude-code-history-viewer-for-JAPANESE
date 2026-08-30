@@ -1306,6 +1306,7 @@ mod tests {
             prevented_continuation: None,
             compact_metadata: None,
             microcompact_metadata: None,
+            is_compact_summary: None,
             provider: Some("claude".to_string()),
         }
     }

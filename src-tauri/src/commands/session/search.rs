@@ -252,6 +252,7 @@ fn search_in_file(file_path: &PathBuf, matcher: &AhoCorasick) -> Vec<ClaudeMessa
             prevented_continuation: None,
             compact_metadata: None,
             microcompact_metadata: None,
+            is_compact_summary: None,
             provider: None,
         };
         results.push(claude_message);

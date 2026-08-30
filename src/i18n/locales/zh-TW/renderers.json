@@ -115,6 +115,8 @@
   "commandRenderer.status": "狀態:",
   "commandRenderer.systemNote": "系統備註",
   "commandRenderer.unknownContentType": "未知內容類型",
+  "compactSummaryRenderer.preview": "已保留 {{count}} 個字元",
+  "compactSummaryRenderer.title": "已壓縮的上下文",
   "contentArray.cacheCreation": "快取建立:",
   "contentArray.cacheRead": "快取讀取:",
   "contentArray.claudeApiResponse": "Claude API 回應",

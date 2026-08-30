@@ -47,6 +47,7 @@ mod claude_message_snapshots {
             prevented_continuation: None,
             compact_metadata: None,
             microcompact_metadata: None,
+            is_compact_summary: None,
             provider: None,
         };
 
@@ -97,6 +98,7 @@ mod claude_message_snapshots {
             prevented_continuation: None,
             compact_metadata: None,
             microcompact_metadata: None,
+            is_compact_summary: None,
             provider: None,
         };
 
@@ -165,6 +167,7 @@ mod claude_message_snapshots {
             prevented_continuation: None,
             compact_metadata: None,
             microcompact_metadata: None,
+            is_compact_summary: None,
             provider: Some("forgecode".to_string()),
         };
 
@@ -224,6 +227,7 @@ mod claude_message_snapshots {
             prevented_continuation: None,
             compact_metadata: None,
             microcompact_metadata: None,
+            is_compact_summary: None,
             provider: Some("pi".to_string()),
         };
 
@@ -284,6 +288,7 @@ mod claude_message_snapshots {
             prevented_continuation: None,
             compact_metadata: None,
             microcompact_metadata: None,
+            is_compact_summary: None,
             provider: None,
         };
 

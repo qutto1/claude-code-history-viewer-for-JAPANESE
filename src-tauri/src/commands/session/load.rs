@@ -1669,6 +1669,7 @@ fn parse_line_to_message(
             prevented_continuation: None,
             compact_metadata: None,
             microcompact_metadata: None,
+            is_compact_summary: None,
             provider: None,
         });
     }
@@ -1730,6 +1731,7 @@ fn parse_line_to_message(
         prevented_continuation: log_entry.prevented_continuation,
         compact_metadata: log_entry.compact_metadata,
         microcompact_metadata: log_entry.microcompact_metadata,
+        is_compact_summary: log_entry.is_compact_summary,
         provider: None,
     })
 }
@@ -1799,6 +1801,7 @@ fn parse_line_simd(
             prevented_continuation: None,
             compact_metadata: None,
             microcompact_metadata: None,
+            is_compact_summary: None,
             provider: None,
         });
     }
@@ -1873,6 +1876,7 @@ fn parse_line_simd(
         prevented_continuation: log_entry.prevented_continuation,
         compact_metadata: log_entry.compact_metadata,
         microcompact_metadata: log_entry.microcompact_metadata,
+        is_compact_summary: log_entry.is_compact_summary,
         provider: None,
     })
 }

@@ -10,6 +10,9 @@ import { isEmptyMessage } from "./messageHelpers";
 // Default heights by message type (in pixels)
 const HEIGHT_DEFAULTS = {
   summary: 56,
+  // Collapsed /compact card — its body is ~16k chars, so it must never be
+  // estimated from content length or the virtual list jumps on first paint.
+  compactSummary: 56,
   progress: 40,
   agentTaskGroup: 130,
   agentProgressGroup: 100,
@@ -166,6 +169,11 @@ export function estimateMessageHeight(
   // Summary messages (collapsible)
   if (message.type === "summary") {
     return HEIGHT_DEFAULTS.summary;
+  }
+
+  // Compact summary rows render collapsed (CompactSummaryRenderer)
+  if (message.type === "user" && message.isCompactSummary) {
+    return HEIGHT_DEFAULTS.compactSummary;
   }
 
   // Progress messages

@@ -28,6 +28,7 @@ export type {
   ClaudeMessage,
   ClaudeAssistantMessage,
   ClaudeUserMessage,
+  CompactBoundaryMetadata,
   ClaudeSystemMessage,
   ClaudeSummaryMessage,
   ClaudeFileHistoryMessage,

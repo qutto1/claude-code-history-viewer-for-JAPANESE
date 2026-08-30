@@ -123,6 +123,9 @@ pub struct RawLogEntry {
     pub compact_metadata: Option<serde_json::Value>,
     #[serde(rename = "microcompactMetadata")]
     pub microcompact_metadata: Option<serde_json::Value>,
+    /// Set on the `user` record that carries the post-/compact summary text.
+    #[serde(rename = "isCompactSummary")]
+    pub is_compact_summary: Option<bool>,
     pub content: Option<serde_json::Value>,
 
     // Meta message flag (internal/command-related messages)
@@ -208,6 +211,10 @@ pub struct ClaudeMessage {
         skip_serializing_if = "Option::is_none"
     )]
     pub microcompact_metadata: Option<serde_json::Value>,
+    /// Marks the `user` record holding the /compact summary, so the viewer can
+    /// render it as a readable card instead of a 3-line chat bubble.
+    #[serde(rename = "isCompactSummary", skip_serializing_if = "Option::is_none")]
+    pub is_compact_summary: Option<bool>,
     /// Provider identifier (claude, codex, opencode)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
@@ -435,6 +442,7 @@ mod tests {
             prevented_continuation: None,
             compact_metadata: None,
             microcompact_metadata: None,
+            is_compact_summary: None,
             provider: None,
         };
 
@@ -480,6 +488,7 @@ mod tests {
             prevented_continuation: None,
             compact_metadata: None,
             microcompact_metadata: None,
+            is_compact_summary: None,
             provider: None,
         };
 

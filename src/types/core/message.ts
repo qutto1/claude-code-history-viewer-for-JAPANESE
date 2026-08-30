@@ -179,6 +179,12 @@ export interface ClaudeUserMessage extends BaseClaudeMessage {
   type: "user";
   role: "user";
   toolUseResult?: Record<string, unknown> | string;
+  /**
+   * True on the synthetic user turn Claude Code writes after `/compact`,
+   * whose content is the carried-over context summary rather than something
+   * the human typed.
+   */
+  isCompactSummary?: boolean;
 }
 
 /** Represents response from Claude */
@@ -230,8 +236,21 @@ export interface ClaudeSystemMessage extends BaseClaudeMessage {
   durationMs?: number;
 
   // boundary fields
-  compactMetadata?: { trigger?: string; preTokens?: number };
-  microcompactMetadata?: { trigger?: string; preTokens?: number };
+  compactMetadata?: CompactBoundaryMetadata;
+  microcompactMetadata?: CompactBoundaryMetadata;
+}
+
+/**
+ * Payload of a `compact_boundary` / `microcompact_boundary` system record.
+ * The backend forwards it verbatim, so more fields than these may be present.
+ */
+export interface CompactBoundaryMetadata {
+  trigger?: string;
+  preTokens?: number;
+  postTokens?: number;
+  durationMs?: number;
+  cumulativeDroppedTokens?: number;
+  preservedMessages?: { uuids?: string[]; allUuids?: string[] };
 }
 
 /** High level session summary */
