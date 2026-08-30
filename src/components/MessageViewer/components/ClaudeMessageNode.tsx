@@ -62,6 +62,7 @@ export const ClaudeMessageNode = React.memo(({
   onHideMessage,
   isSelected,
   onRangeSelect,
+  isModelChanged = false,
 }: MessageNodeProps) => {
   const { t } = useTranslation();
   const messageFilter = useAppStore((s) => s.messageFilter);
@@ -437,7 +438,7 @@ export const ClaudeMessageNode = React.memo(({
       >
         {CaptureHideButton}
         <div className="max-w-4xl mx-auto flex items-start gap-2">
-          <MessageGutter message={message} />
+          <MessageGutter message={message} isModelChanged={isModelChanged} />
 
           <div className="w-full min-w-0 flex-1">
             {(message.type !== "assistant" || messageFilter.contentTypes.text) && (

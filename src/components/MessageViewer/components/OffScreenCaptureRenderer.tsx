@@ -21,6 +21,13 @@ interface OffScreenCaptureRendererProps {
   selectedMessageIds: string[];
   /** Hidden message UUIDs to exclude */
   hiddenMessageIds: string[];
+  /**
+   * UUIDs whose model differs from the previous modelled message. Handed in
+   * rather than recomputed so a screenshot reproduces the emphasis the reader
+   * saw on screen; a capture is usually a slice of the session, and deriving it
+   * from the slice alone would call its first turn a model change.
+   */
+  modelChangedUuids: Set<string>;
 }
 
 /**
@@ -31,7 +38,7 @@ export const OffScreenCaptureRenderer = forwardRef<
   HTMLDivElement,
   OffScreenCaptureRendererProps
 >(function OffScreenCaptureRenderer(
-  { flattenedMessages, selectedMessageIds, hiddenMessageIds },
+  { flattenedMessages, selectedMessageIds, hiddenMessageIds, modelChangedUuids },
   ref,
 ) {
   const { t } = useTranslation();
@@ -91,6 +98,7 @@ export const OffScreenCaptureRenderer = forwardRef<
             taskRegistry={item.taskRegistry}
             isTaskOperationGroupMember={false}
             isCaptureMode={false}
+            isModelChanged={modelChangedUuids.has(item.message.uuid)}
           />
         ))}
       </div>

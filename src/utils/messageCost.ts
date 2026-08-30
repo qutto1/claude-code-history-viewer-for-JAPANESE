@@ -168,3 +168,10 @@ export const formatCostCompact = (usd: number): string => `$${usd.toFixed(1)}`;
 
 /** Above this the gutter shows the cost in red so an expensive turn stands out. */
 export const EXPENSIVE_MESSAGE_COST_USD = 3;
+
+/**
+ * Below this the gutter greys the cost out. Most turns in a real session land
+ * here, and a column of equally-loud sub-dollar figures buries the few turns
+ * that actually cost something — the point of the line is the outlier.
+ */
+export const NEGLIGIBLE_MESSAGE_COST_USD = 1;

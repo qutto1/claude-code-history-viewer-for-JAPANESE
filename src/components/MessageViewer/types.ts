@@ -50,10 +50,18 @@ export interface MessageNodeProps {
   // Multi-selection
   isSelected?: boolean;
   onRangeSelect?: (uuid: string, modifiers: { shift: boolean; cmdOrCtrl: boolean }) => void;
+  /** Passed straight to the gutter — see `MessageGutterProps.isModelChanged`. */
+  isModelChanged?: boolean;
 }
 
 export interface MessageGutterProps {
   message: ClaudeMessage;
+  /**
+   * True when this message's model differs from the previous modelled message.
+   * Derived once per session (see `helpers/modelChangeHelpers`) because rows are
+   * virtualized and cannot look at their neighbours. Defaults to de-emphasised.
+   */
+  isModelChanged?: boolean;
 }
 
 export interface SummaryMessageProps {

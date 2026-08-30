@@ -31,6 +31,7 @@ import {
   groupAgentProgressMessages,
   groupTaskOperations,
   applyMessageDisplayFilter,
+  collectModelChangeUuids,
 } from "./helpers";
 import { useAppStore } from "../../store/useAppStore";
 import { useExpandRegistry } from "../../store/expandRegistryStore";
@@ -259,6 +260,17 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
   // const isTarget = isMessage && shouldHighlightTarget && targetMessageUuid === item.message.uuid;
   // const isCurrentMatch = (isMessage && currentMatchUuid === item.message.uuid) || isTarget;
 
+
+  // Which turns switched model. Derived once over the same array the rows are
+  // built from — a virtualized row cannot look at its neighbours, and threading
+  // the previous message down through three components would make every row
+  // depend on render order. `displayMessages` rather than the raw `messages` so
+  // the emphasis matches the sequence actually on screen when a role/content
+  // filter is hiding turns.
+  const modelChangedUuids = useMemo(
+    () => collectModelChangeUuids(displayMessages),
+    [displayMessages],
+  );
 
   // Deduplicate messages for grouping
   const uniqueMessages = useMemo(() => {
@@ -1246,6 +1258,7 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
                   isSelected={itemIsSelected}
                   onRangeSelect={isCaptureMode ? handleRangeSelect : undefined}
                   isInSubagent={isInSubagent}
+                  isModelChanged={isMessage && modelChangedUuids.has(item.message.uuid)}
                 />
               );
             })}
@@ -1298,6 +1311,7 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
           flattenedMessages={flattenedMessages}
           selectedMessageIds={selectedMessageIds}
           hiddenMessageIds={hiddenMessageIds}
+          modelChangedUuids={modelChangedUuids}
         />
       )}
 

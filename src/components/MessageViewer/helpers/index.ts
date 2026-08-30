@@ -9,4 +9,5 @@ export { groupAgentTasks } from "./agentTaskHelpers";
 export { groupAgentProgressMessages } from "./agentProgressHelpers";
 export { filterMessagesByCategory, getMessageUuidsByCategory } from "./messageCategories";
 export { applyMessageDisplayFilter } from "./messageDisplayFilter";
+export { collectModelChangeUuids } from "./modelChangeHelpers";
 export { groupTaskOperations } from "./taskOperationHelpers";

@@ -34,6 +34,8 @@ interface VirtualizedMessageRowProps {
   isSelected?: boolean;
   onRangeSelect?: (uuid: string, modifiers: { shift: boolean; cmdOrCtrl: boolean }) => void;
   isInSubagent?: boolean;
+  /** Gutter model-line emphasis — see `MessageGutterProps.isModelChanged`. */
+  isModelChanged?: boolean;
 }
 
 /**
@@ -59,6 +61,7 @@ export const VirtualizedMessageRow = forwardRef<
     isSelected,
     onRangeSelect,
     isInSubagent = false,
+    isModelChanged = false,
   },
   ref
 ) {
@@ -171,6 +174,7 @@ export const VirtualizedMessageRow = forwardRef<
         onHideMessage={onHideMessage}
         isSelected={isSelected}
         onRangeSelect={onRangeSelect}
+        isModelChanged={isModelChanged}
       />
     </div>
   );
