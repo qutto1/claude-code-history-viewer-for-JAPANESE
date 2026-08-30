@@ -51,7 +51,32 @@ export interface ProjectSliceState {
   isLoadingMoreSessions: boolean;
   isRefreshingAllConversations: boolean;
   error: AppError | null;
+  /**
+   * Session pages keyed by project path, so several projects can stay expanded
+   * in the tree at once. The selected project's entry mirrors the flat
+   * `sessions` fields above, which the rest of the app still reads.
+   */
+  sessionsByProject: Record<string, ProjectSessions>;
 }
+
+/** One project's slice of the session list, as shown in the tree. */
+export interface ProjectSessions {
+  sessions: ClaudeSession[];
+  total: number;
+  offset: number;
+  hasMore: boolean;
+  isLoading: boolean;
+  isLoadingMore: boolean;
+}
+
+export const EMPTY_PROJECT_SESSIONS: ProjectSessions = {
+  sessions: [],
+  total: 0,
+  offset: 0,
+  hasMore: false,
+  isLoading: false,
+  isLoadingMore: false,
+};
 
 export interface ProjectSliceActions {
   initializeApp: () => Promise<void>;
@@ -61,6 +86,10 @@ export interface ProjectSliceActions {
   selectProject: (project: ClaudeProject) => Promise<void>;
   reloadProjectSessions: (project: ClaudeProject) => Promise<void>;
   loadMoreSessions: () => Promise<void>;
+  /** Load the first page for a project expanded in the tree, if not cached. */
+  ensureProjectSessionsLoaded: (project: ClaudeProject) => Promise<void>;
+  /** Append the next page for a project expanded in the tree. */
+  loadMoreSessionsForProject: (project: ClaudeProject) => Promise<void>;
   clearProjectSelection: (options?: WebUINavigationOptions) => void;
   setClaudePath: (path: string) => Promise<void>;
   setError: (error: AppError | null) => void;
@@ -92,6 +121,7 @@ const initialProjectState: ProjectSliceState = {
   isLoadingMoreSessions: false,
   isRefreshingAllConversations: false,
   error: null,
+  sessionsByProject: {},
 };
 
 const SESSION_PAGE_LIMIT = 250;
@@ -701,12 +731,25 @@ export const createProjectSlice: StateCreator<
         return;
       }
 
-      set({
+      set((state) => ({
         sessions: page.sessions,
         sessionsTotal: page.total,
         sessionsOffset: page.nextOffset,
         hasMoreSessions: page.hasMore,
-      });
+        // Mirror into the per-project cache so the row keeps its sessions when
+        // the user selects a different project without collapsing this one.
+        sessionsByProject: {
+          ...state.sessionsByProject,
+          [project.path]: {
+            sessions: page.sessions,
+            total: page.total,
+            offset: page.nextOffset,
+            hasMore: page.hasMore,
+            isLoading: false,
+            isLoadingMore: false,
+          },
+        },
+      }));
 
       const held = get().selectedSession;
       if (held) {
@@ -738,6 +781,126 @@ export const createProjectSlice: StateCreator<
       if (requestId === getRequestId("selectProject")) {
         set({ isLoadingSessions: false });
       }
+    }
+  },
+
+  /**
+   * Load page 1 for a project the user expanded in the tree but has not
+   * selected. Selection still goes through `selectProject`; this only fills
+   * the per-project cache so the expanded row has rows to show.
+   *
+   * The request id is keyed per path — a single shared key would let two
+   * expansions cancel each other and leave the first one permanently empty.
+   */
+  ensureProjectSessionsLoaded: async (project: ClaudeProject) => {
+    const existing = get().sessionsByProject[project.path];
+    if (existing && (existing.sessions.length > 0 || existing.isLoading)) return;
+
+    const key = `projectSessions:${project.path}`;
+    const requestId = nextRequestId(key);
+    set((state) => ({
+      sessionsByProject: {
+        ...state.sessionsByProject,
+        [project.path]: { ...EMPTY_PROJECT_SESSIONS, isLoading: true },
+      },
+    }));
+
+    try {
+      const page = await api<SessionPage>("load_provider_sessions_page", {
+        provider: project.provider ?? "claude",
+        projectPath: project.path,
+        excludeSidechain: get().excludeSidechain,
+        offset: 0,
+        limit: SESSION_PAGE_LIMIT,
+      });
+      if (requestId !== getRequestId(key)) return;
+      set((state) => ({
+        sessionsByProject: {
+          ...state.sessionsByProject,
+          [project.path]: {
+            sessions: page.sessions,
+            total: page.total,
+            offset: page.nextOffset,
+            hasMore: page.hasMore,
+            isLoading: false,
+            isLoadingMore: false,
+          },
+        },
+      }));
+    } catch (error) {
+      if (requestId !== getRequestId(key)) return;
+      console.error("Failed to load sessions for expanded project:", error);
+      set((state) => ({
+        sessionsByProject: {
+          ...state.sessionsByProject,
+          [project.path]: { ...EMPTY_PROJECT_SESSIONS, isLoading: false },
+        },
+      }));
+    }
+  },
+
+  loadMoreSessionsForProject: async (project: ClaudeProject) => {
+    const entry = get().sessionsByProject[project.path];
+    if (!entry || !entry.hasMore || entry.isLoading || entry.isLoadingMore) return;
+
+    const key = `projectSessionsMore:${project.path}`;
+    const requestId = nextRequestId(key);
+    set((state) => ({
+      sessionsByProject: {
+        ...state.sessionsByProject,
+        [project.path]: { ...entry, isLoadingMore: true },
+      },
+    }));
+
+    try {
+      const page = await api<SessionPage>("load_provider_sessions_page", {
+        provider: project.provider ?? "claude",
+        projectPath: project.path,
+        excludeSidechain: get().excludeSidechain,
+        offset: entry.offset,
+        limit: SESSION_PAGE_LIMIT,
+      });
+      if (requestId !== getRequestId(key)) return;
+      set((state) => {
+        const current = state.sessionsByProject[project.path] ?? entry;
+        const merged = dedupeSessionsById([...current.sessions, ...page.sessions]);
+        const next = {
+          sessionsByProject: {
+            ...state.sessionsByProject,
+            [project.path]: {
+              sessions: merged,
+              total: page.total,
+              offset: page.nextOffset,
+              hasMore: page.hasMore,
+              isLoading: false,
+              isLoadingMore: false,
+            },
+          },
+        };
+        // Keep the flat fields in step while this is the selected project, so
+        // the header and exports see the same rows the tree shows.
+        return state.selectedProject?.path === project.path
+          ? {
+              ...next,
+              sessions: merged,
+              sessionsTotal: page.total,
+              sessionsOffset: page.nextOffset,
+              hasMoreSessions: page.hasMore,
+            }
+          : next;
+      });
+    } catch (error) {
+      if (requestId !== getRequestId(key)) return;
+      console.error("Failed to load more sessions for expanded project:", error);
+      set((state) => {
+        const current = state.sessionsByProject[project.path] ?? entry;
+        return {
+          sessionsByProject: {
+            ...state.sessionsByProject,
+            [project.path]: { ...current, isLoadingMore: false },
+          },
+        };
+      });
     }
   },
 

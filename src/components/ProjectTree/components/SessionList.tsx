@@ -225,6 +225,7 @@ export const SessionList: React.FC<SessionListProps> = ({
   onLoadMoreSessions = () => {},
   formatTimeAgo,
   variant = "default",
+  selectionProjectPath,
 }) => {
   const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
@@ -237,7 +238,15 @@ export const SessionList: React.FC<SessionListProps> = ({
     getSessionDisplayName,
   } = useAppStore();
   const fontScale = useAppStore((s) => s.fontScale);
-  const isSelectionMode = useAppStore((s) => s.isSessionSelectionMode);
+  const selectionModeActive = useAppStore((s) => s.isSessionSelectionMode);
+  const selectionOwnerPath = useAppStore((s) => s.sessionSelectionProjectPath);
+  // With several projects expanded at once, multi-select (which can delete
+  // sessions) stays inside the list it was started from.
+  const isSelectionMode =
+    selectionModeActive &&
+    (selectionProjectPath == null ||
+      selectionOwnerPath == null ||
+      selectionOwnerPath === selectionProjectPath);
   const sessionSelectionIds = useAppStore((s) => s.sessionSelectionIds);
   const toggleSessionSelectionMode = useAppStore((s) => s.toggleSessionSelectionMode);
   const enterSessionSelectionMode = useAppStore((s) => s.enterSessionSelectionMode);
@@ -348,7 +357,7 @@ export const SessionList: React.FC<SessionListProps> = ({
         cmdOrCtrl: e.metaKey || e.ctrlKey,
       };
       if (!isSelectionMode) {
-        enterSessionSelectionMode();
+        enterSessionSelectionMode(selectionProjectPath);
         const seedId =
           selectedSession &&
           selectedSession.session_id !== session.session_id &&
@@ -367,6 +376,7 @@ export const SessionList: React.FC<SessionListProps> = ({
     [
       isSelectionMode,
       enterSessionSelectionMode,
+      selectionProjectPath,
       selectedSession,
       orderedIds,
       handleSessionSelectionClick,

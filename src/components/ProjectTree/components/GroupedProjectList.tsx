@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { ClaudeProject, ClaudeSession } from "../../../types";
 import type { WorktreeGroup, DirectoryGroup } from "../../../utils/worktreeUtils";
 import type { GroupingStrategy } from "../types";
+import type { ProjectSessions } from "../../../store/slices/projectSlice";
 import { ProjectItem } from "./ProjectItem";
 import { SessionList } from "./SessionList";
 import { GroupHeader } from "./GroupHeader";
@@ -32,6 +33,10 @@ interface GroupedProjectListProps {
   onSessionSelect: (session: ClaudeSession) => void;
   onSessionHover?: (session: ClaudeSession) => void;
   onLoadMoreSessions?: () => void;
+  /** Cached session page per project path, for rows other than the selected one */
+  sessionsByProject?: Record<string, ProjectSessions>;
+  /** Loads the next page for an expanded, non-selected project */
+  loadMoreSessionsForProject?: (project: ClaudeProject) => void;
   formatTimeAgo: (date: string) => string;
 }
 
@@ -57,6 +62,8 @@ export const GroupedProjectList: React.FC<GroupedProjectListProps> = ({
   onSessionSelect,
   onSessionHover,
   onLoadMoreSessions = () => {},
+  sessionsByProject = {},
+  loadMoreSessionsForProject,
   formatTimeAgo,
 }) => {
   const { t } = useTranslation();
@@ -83,7 +90,20 @@ export const GroupedProjectList: React.FC<GroupedProjectListProps> = ({
     ariaLevel = 1
   ) => {
     const isExpanded = isProjectExpanded(project.path);
-    const showSessions = isExpanded && selectedProject?.path === project.path;
+    // Every expanded project shows its own sessions, not just the selected
+    // one — the store keeps a page per project path.
+    const showSessions = isExpanded;
+    const isSelectedProject = selectedProject?.path === project.path;
+    const cached = sessionsByProject[project.path];
+    // The selected project reads the flat fields, which selectProject and the
+    // file watcher keep freshest; other rows read their cached page.
+    const rowSessions = isSelectedProject ? sessions : cached?.sessions ?? [];
+    const rowTotal = isSelectedProject ? sessionsTotal : cached?.total;
+    const rowHasMore = isSelectedProject ? hasMoreSessions : cached?.hasMore;
+    const rowIsLoading = isSelectedProject ? isLoading : cached?.isLoading ?? false;
+    const rowIsLoadingMore = isSelectedProject
+      ? isLoadingMoreSessions
+      : cached?.isLoadingMore ?? false;
 
     // NOTE: collapsed rows previously used `content-visibility: auto` to skip
     // offscreen paint (#460). Removed because WebKit (WKWebView/WebKitGTK)
@@ -109,17 +129,22 @@ export const GroupedProjectList: React.FC<GroupedProjectListProps> = ({
         {showSessions && (
           <div role="none">
             <SessionList
-              sessions={sessions}
-              sessionsTotal={sessionsTotal}
-              hasMoreSessions={hasMoreSessions}
+              sessions={rowSessions}
+              sessionsTotal={rowTotal}
+              hasMoreSessions={rowHasMore}
               selectedSession={selectedSession}
-              isLoading={isLoading}
-              isLoadingMoreSessions={isLoadingMoreSessions}
+              isLoading={rowIsLoading}
+              isLoadingMoreSessions={rowIsLoadingMore}
               onSessionSelect={onSessionSelect}
               onSessionHover={onSessionHover}
-              onLoadMoreSessions={onLoadMoreSessions}
+              onLoadMoreSessions={
+                isSelectedProject
+                  ? onLoadMoreSessions
+                  : () => loadMoreSessionsForProject?.(project)
+              }
               formatTimeAgo={formatTimeAgo}
               variant={variant}
+              selectionProjectPath={project.path}
             />
           </div>
         )}

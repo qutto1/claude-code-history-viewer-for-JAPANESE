@@ -28,7 +28,7 @@ import { ProjectContextMenu } from "../ProjectContextMenu";
 import { useProjectTreeState } from "./hooks/useProjectTreeState";
 import { GroupedProjectList } from "./components/GroupedProjectList";
 import type { ProjectTreeProps } from "./types";
-import type { ProviderId, ClaudeSession } from "../../types";
+import type { ProviderId, ClaudeSession, ClaudeProject } from "../../types";
 import { useAppStore } from "../../store/useAppStore";
 import {
   buildTreeItemAnnouncement,
@@ -98,6 +98,19 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
   const loadGlobalStats = useAppStore((state) => state.loadGlobalStats);
   const clearProjectSelection = useAppStore(
     (state) => state.clearProjectSelection
+  );
+  const ensureProjectSessionsLoaded = useAppStore(
+    (state) => state.ensureProjectSessionsLoaded
+  );
+  const sessionsByProject = useAppStore((state) => state.sessionsByProject);
+  const loadMoreSessionsForProjectAction = useAppStore(
+    (state) => state.loadMoreSessionsForProject
+  );
+  const loadMoreSessionsForProject = useCallback(
+    (project: ClaudeProject) => {
+      void loadMoreSessionsForProjectAction(project);
+    },
+    [loadMoreSessionsForProjectAction]
   );
 
   const {
@@ -478,15 +491,12 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
           return next;
         });
       } else {
-        // Selecting new project: collapse all other projects (accordion), expand this one
+        // Selecting a new project expands it and leaves every other expansion
+        // alone. Collapsing the siblings used to be deliberate, but each
+        // expanded row now keeps its own session page, so there is nothing to
+        // gain by throwing the user's other open projects away.
         setExpandedProjects((prev) => {
-          const next = new Set<string>();
-          // Preserve group-level expansions (dir:, group: prefixed keys)
-          for (const key of prev) {
-            if (key.startsWith("dir:") || key.startsWith("group:")) {
-              next.add(key);
-            }
-          }
+          const next = new Set(prev);
           next.add(project.path);
           return next;
         });
@@ -537,28 +547,22 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
     selectedSession?.file_path,
   ]);
 
+  // Several projects can be expanded at once, and only the selected one is
+  // loaded by `selectProject`. Fill in the rest so an expanded row is never
+  // left showing an empty list.
+  useEffect(() => {
+    for (const key of expandedProjects) {
+      if (key.startsWith("dir:") || key.startsWith("group:")) continue;
+      const project = projects.find((p) => p.path === key);
+      if (project) void ensureProjectSessionsLoaded(project);
+    }
+  }, [expandedProjects, projects, ensureProjectSessionsLoaded]);
+
   const handleGlobalStatsClick = useCallback(() => {
-    // Global stats 진입 시 현재 열려 있는 프로젝트 확장을 닫는다.
-    setExpandedProjects((prev) => {
-      if (prev.size === 0) {
-        return prev;
-      }
-
-      let changed = false;
-      const next = new Set<string>();
-      for (const key of prev) {
-        if (key.startsWith("dir:") || key.startsWith("group:")) {
-          next.add(key);
-          continue;
-        }
-        changed = true;
-      }
-
-      return changed ? next : prev;
-    });
-
+    // Expansions are the user's own arrangement of the tree now that several
+    // projects can stay open, so entering global stats leaves them untouched.
     onGlobalStatsClick();
-  }, [onGlobalStatsClick, setExpandedProjects]);
+  }, [onGlobalStatsClick]);
 
   const sidebarStyle = isCollapsed ? { width: "48px" } : width ? { width: `${width}px` } : undefined;
   const treeRef = useRef<HTMLDivElement>(null);
@@ -1158,6 +1162,8 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
                 ungroupedProjects={filteredUngroupedProjects}
                 showProviderBadge={showProviderBadge}
                 sessions={sessions}
+                sessionsByProject={sessionsByProject}
+                loadMoreSessionsForProject={loadMoreSessionsForProject}
                 sessionsTotal={sessionsTotal}
                 hasMoreSessions={hasMoreSessions}
                 selectedProject={selectedProject}

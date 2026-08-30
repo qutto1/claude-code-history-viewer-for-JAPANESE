@@ -185,3 +185,61 @@ describe("GroupedProjectList", () => {
     expect(screen.getByTestId(`project-item-${project.path}`)).toBeInTheDocument();
   });
 });
+
+describe("GroupedProjectList multi-expand", () => {
+  const emptyPage = {
+    sessions: [],
+    total: 0,
+    offset: 0,
+    hasMore: false,
+    isLoading: false,
+    isLoadingMore: false,
+  };
+
+  function renderExpanded(expanded: string[], selectedPath: string | null) {
+    const a = createProject("/tmp/project-a", "project-a");
+    const b = createProject("/tmp/project-b", "project-b");
+    const expandedSet = new Set(expanded);
+    render(
+      <GroupedProjectList
+        groupingMode="none"
+        projects={[a, b]}
+        directoryGroups={[]}
+        worktreeGroups={[]}
+        sessions={[]}
+        sessionsByProject={{
+          [a.path]: { ...emptyPage },
+          [b.path]: { ...emptyPage },
+        }}
+        selectedProject={
+          selectedPath ? [a, b].find((p) => p.path === selectedPath) ?? null : null
+        }
+        selectedSession={null}
+        isLoading={false}
+        expandedProjects={expandedSet}
+        setExpandedProjects={vi.fn()}
+        isProjectExpanded={(path) => expandedSet.has(path)}
+        handleProjectClick={vi.fn()}
+        handleContextMenu={vi.fn()}
+        onSessionSelect={vi.fn()}
+        formatTimeAgo={(date) => date}
+      />
+    );
+    return { a, b };
+  }
+
+  it("shows a session list for every expanded project, not just the selected one", () => {
+    renderExpanded(["/tmp/project-a", "/tmp/project-b"], "/tmp/project-a");
+    expect(screen.getAllByTestId("session-list")).toHaveLength(2);
+  });
+
+  it("shows a session list for an expanded project even with nothing selected", () => {
+    renderExpanded(["/tmp/project-b"], null);
+    expect(screen.getAllByTestId("session-list")).toHaveLength(1);
+  });
+
+  it("shows no session list for a collapsed project", () => {
+    renderExpanded([], "/tmp/project-a");
+    expect(screen.queryAllByTestId("session-list")).toHaveLength(0);
+  });
+});

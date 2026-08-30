@@ -71,6 +71,12 @@ export interface SessionListProps {
   onLoadMoreSessions?: () => void;
   formatTimeAgo: (date: string) => string;
   variant?: "default" | "main" | "worktree";
+  /**
+   * Path of the project this list belongs to. Several lists can be on screen
+   * at once, so multi-select — which can delete sessions — is confined to the
+   * list it was started from.
+   */
+  selectionProjectPath?: string;
 }
 
 export interface GroupHeaderProps {

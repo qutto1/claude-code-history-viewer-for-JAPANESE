@@ -24,15 +24,21 @@ export interface SessionSelectionSliceState {
   sessionSelectionIds: string[];
   /** Session ID of the selection anchor (for Shift range selection) */
   sessionSelectionAnchor: string | null;
+  /**
+   * Project whose list owns the current multi-selection. Several session lists
+   * can be on screen at once and the selection can delete sessions, so it must
+   * never span projects.
+   */
+  sessionSelectionProjectPath: string | null;
 }
 
 export interface SessionSelectionSliceActions {
   /** Turn multi-select mode on */
-  enterSessionSelectionMode: () => void;
+  enterSessionSelectionMode: (projectPath?: string) => void;
   /** Turn multi-select mode off and clear the selection */
   exitSessionSelectionMode: () => void;
   /** Toggle multi-select mode (exiting clears the selection) */
-  toggleSessionSelectionMode: () => void;
+  toggleSessionSelectionMode: (projectPath?: string) => void;
   /** Handle a selection click on a session row with modifier keys */
   handleSessionSelectionClick: (
     sessionId: string,
@@ -56,6 +62,7 @@ const initialSessionSelectionState: SessionSelectionSliceState = {
   isSessionSelectionMode: false,
   sessionSelectionIds: [],
   sessionSelectionAnchor: null,
+  sessionSelectionProjectPath: null,
 };
 
 // ============================================================================
@@ -84,8 +91,8 @@ export const createSessionSelectionSlice: StateCreator<
 > = (set, get) => ({
   ...initialSessionSelectionState,
 
-  enterSessionSelectionMode: () => {
-    set({ isSessionSelectionMode: true });
+  enterSessionSelectionMode: (projectPath?: string) => {
+    set({ isSessionSelectionMode: true, sessionSelectionProjectPath: projectPath ?? null });
   },
 
   exitSessionSelectionMode: () => {
@@ -93,14 +100,15 @@ export const createSessionSelectionSlice: StateCreator<
       isSessionSelectionMode: false,
       sessionSelectionIds: [],
       sessionSelectionAnchor: null,
+      sessionSelectionProjectPath: null,
     });
   },
 
-  toggleSessionSelectionMode: () => {
+  toggleSessionSelectionMode: (projectPath?: string) => {
     if (get().isSessionSelectionMode) {
       get().exitSessionSelectionMode();
     } else {
-      set({ isSessionSelectionMode: true });
+      set({ isSessionSelectionMode: true, sessionSelectionProjectPath: projectPath ?? null });
     }
   },
 

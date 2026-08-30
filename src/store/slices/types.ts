@@ -27,6 +27,7 @@ import type {
   SubagentSession,
 } from "../../types";
 import type { ProjectTokenStatsPagination } from "./messageSlice";
+import type { ProjectSessions } from "./projectSlice";
 import type { AnalyticsState, AnalyticsViewType } from "../../types/analytics";
 import type { UpdateSettings } from "../../types/updateSettings";
 
@@ -102,6 +103,7 @@ export interface AppStoreState {
   sessionsTotal: number;
   sessionsOffset: number;
   hasMoreSessions: boolean;
+  sessionsByProject: Record<string, ProjectSessions>;
   selectedSession: ClaudeSession | null;
   isLoading: boolean;
   isLoadingProjects: boolean;
@@ -228,6 +230,7 @@ export interface AppStoreState {
   isSessionSelectionMode: boolean;
   sessionSelectionIds: string[];
   sessionSelectionAnchor: string | null;
+  sessionSelectionProjectPath: string | null;
 }
 
 export interface AppStoreActions {
@@ -246,6 +249,8 @@ export interface AppStoreActions {
   selectProject: (project: ClaudeProject) => Promise<void>;
   reloadProjectSessions: (project: ClaudeProject) => Promise<void>;
   loadMoreSessions: () => Promise<void>;
+  ensureProjectSessionsLoaded: (project: ClaudeProject) => Promise<void>;
+  loadMoreSessionsForProject: (project: ClaudeProject) => Promise<void>;
   clearProjectSelection: (
     options?: import("@/utils/webuiDeepLink").WebUINavigationOptions,
   ) => void;
@@ -466,9 +471,9 @@ export interface AppStoreActions {
   loadServerConfig: () => Promise<void>;
 
   // Session selection (multi-select mode) actions
-  enterSessionSelectionMode: () => void;
+  enterSessionSelectionMode: (projectPath?: string) => void;
   exitSessionSelectionMode: () => void;
-  toggleSessionSelectionMode: () => void;
+  toggleSessionSelectionMode: (projectPath?: string) => void;
   handleSessionSelectionClick: (
     sessionId: string,
     orderedIds: string[],
