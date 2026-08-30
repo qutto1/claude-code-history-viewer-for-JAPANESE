@@ -119,6 +119,7 @@ export type {
   CustomClaudePath,
   WslDistro,
   WslSettings,
+  SessionAutoRefreshSettings,
   SessionMetadata,
   ProjectMetadata,
   GroupingMode,
@@ -128,6 +129,10 @@ export type {
 export {
   METADATA_SCHEMA_VERSION,
   DEFAULT_USER_METADATA,
+  DEFAULT_SESSION_AUTO_REFRESH,
+  SESSION_AUTO_REFRESH_MIN_MINUTES,
+  SESSION_AUTO_REFRESH_MAX_MINUTES,
+  normalizeAutoRefreshInterval,
   isSessionMetadataEmpty,
   isProjectMetadataEmpty,
   getSessionDisplayName,

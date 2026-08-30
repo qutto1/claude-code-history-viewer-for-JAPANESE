@@ -73,6 +73,32 @@ export interface WslSettings {
   excludedDistros: string[];
 }
 
+/** Periodic session-list refresh settings */
+export interface SessionAutoRefreshSettings {
+  /** Whether the session list refreshes on a timer */
+  enabled: boolean;
+  /** Interval between refreshes, in minutes */
+  intervalMinutes: number;
+}
+
+/** Bounds for {@link SessionAutoRefreshSettings.intervalMinutes} */
+export const SESSION_AUTO_REFRESH_MIN_MINUTES = 1;
+export const SESSION_AUTO_REFRESH_MAX_MINUTES = 1440;
+
+export const DEFAULT_SESSION_AUTO_REFRESH: SessionAutoRefreshSettings = {
+  enabled: false,
+  intervalMinutes: 5,
+};
+
+/** Clamp a user-entered interval into the supported range. */
+export const normalizeAutoRefreshInterval = (minutes: number): number => {
+  if (!Number.isFinite(minutes)) return DEFAULT_SESSION_AUTO_REFRESH.intervalMinutes;
+  return Math.min(
+    SESSION_AUTO_REFRESH_MAX_MINUTES,
+    Math.max(SESSION_AUTO_REFRESH_MIN_MINUTES, Math.round(minutes))
+  );
+};
+
 /** Global user settings */
 export interface UserSettings {
   /** Glob patterns for projects to hide (e.g., "folders-dg-*") */
@@ -87,6 +113,8 @@ export interface UserSettings {
   customClaudePaths?: CustomClaudePath[];
   /** WSL integration settings (Windows only) */
   wsl?: WslSettings;
+  /** Periodic refresh of the selected session's messages */
+  sessionAutoRefresh?: SessionAutoRefreshSettings;
   /** Providers explicitly discovered by the user and allowed to scan on startup */
   discoveredProviderIds?: ProviderId[];
 }

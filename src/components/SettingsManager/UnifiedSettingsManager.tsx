@@ -30,6 +30,7 @@ import { SettingsEditorPane } from "./editor/SettingsEditorPane";
 import { SettingsDiagnosticsPanel } from "./dialogs/SettingsDiagnosticsPanel";
 import { CustomDirectoriesSection } from "./sections/CustomDirectoriesSection";
 import { WslSection } from "./sections/WslSection";
+import { AutoRefreshSection } from "./sections/AutoRefreshSection";
 
 export type ActivePanel = "editor" | "diagnostics";
 
@@ -115,6 +116,7 @@ export const UnifiedSettingsManager: React.FC<UnifiedSettingsManagerProps> = ({
   const [activePanel, setActivePanel] = React.useState<ActivePanel>("editor");
   const [isCustomDirsExpanded, setIsCustomDirsExpanded] = React.useState(false);
   const [isWslExpanded, setIsWslExpanded] = React.useState(false);
+  const [isAutoRefreshExpanded, setIsAutoRefreshExpanded] = React.useState(false);
 
   // Pending changes state (shared across components for dirty tracking)
   const [pendingSettings, setPendingSettings] = React.useState<ClaudeCodeSettings | null>(null);
@@ -326,6 +328,15 @@ export const UnifiedSettingsManager: React.FC<UnifiedSettingsManagerProps> = ({
               <WslSection
                 isExpanded={isWslExpanded}
                 onToggle={(open) => setIsWslExpanded(open)}
+                readOnly={serverReadOnly}
+              />
+            </Card>
+
+            {/* Session auto refresh — app-level setting, independent of Claude Code scope */}
+            <Card className="shrink-0">
+              <AutoRefreshSection
+                isExpanded={isAutoRefreshExpanded}
+                onToggle={(open) => setIsAutoRefreshExpanded(open)}
                 readOnly={serverReadOnly}
               />
             </Card>

@@ -527,5 +527,11 @@
   "settings.wsl.scanning": "Scanning WSL...",
   "settings.wsl.slowWarning": "WSL file access may be slower than native",
   "settings.wsl.defaultBadge": "default",
-  "settings.wsl.detectError": "Failed to detect WSL distributions"
+  "settings.wsl.detectError": "Failed to detect WSL distributions",
+  "settings.autoRefresh.title": "Session auto refresh",
+  "settings.autoRefresh.description": "Periodically re-run the same reload as the refresh button in the header. Useful when file watching cannot see the session files, such as on a network drive.",
+  "settings.autoRefresh.enable": "Refresh automatically",
+  "settings.autoRefresh.interval": "Refresh interval",
+  "settings.autoRefresh.intervalDesc": "Between 1 and 1440 minutes. A refresh is skipped while another one is still running.",
+  "settings.autoRefresh.minutes": "minutes"
 }

@@ -527,5 +527,11 @@
   "settings.wsl.scanning": "正在扫描 WSL...",
   "settings.wsl.slowWarning": "WSL 文件访问可能比本地慢",
   "settings.wsl.defaultBadge": "默认",
-  "settings.wsl.detectError": "检测 WSL 发行版失败"
+  "settings.wsl.detectError": "检测 WSL 发行版失败",
+  "settings.autoRefresh.title": "会话自动刷新",
+  "settings.autoRefresh.description": "定期执行与顶部刷新按钮相同的重新加载。适用于网络驱动器等文件监视无法检测会话文件的环境。",
+  "settings.autoRefresh.enable": "自动刷新",
+  "settings.autoRefresh.interval": "刷新间隔",
+  "settings.autoRefresh.intervalDesc": "取值范围为 1 到 1440 分钟。若上一次刷新仍在进行，则跳过本次刷新。",
+  "settings.autoRefresh.minutes": "分钟"
 }

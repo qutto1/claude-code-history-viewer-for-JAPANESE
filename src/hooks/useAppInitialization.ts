@@ -4,6 +4,7 @@ import { useLanguageStore } from "@/store/useLanguageStore";
 import { type SupportedLanguage } from "@/i18n";
 import { useTranslation } from "react-i18next";
 import { useFileWatcher } from "./useFileWatcher";
+import { useSessionAutoRefresh } from "./useSessionAutoRefresh";
 
 /**
  * App initialization side effects:
@@ -39,6 +40,10 @@ export function useAppInitialization(deps: {
     enabled: watcherEnabled,
     debounceMs: 100,
   });
+
+  // Timer-based refresh, opt-in from Settings. Complements the watcher above,
+  // which only fires on a local filesystem event.
+  useSessionAutoRefresh();
 
   // Language loading + app initialization
   useEffect(() => {

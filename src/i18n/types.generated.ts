@@ -5,8 +5,8 @@
  * 직접 수정하지 마세요.
  *
  * 생성 명령: pnpm run generate:i18n-types
- * 생성 시간: 2026-08-30T00:53:58.179Z
- * 총 키 개수: 1930
+ * 생성 시간: 2026-08-30T01:16:37.712Z
+ * 총 키 개수: 1936
  * Namespace 수: 11
  */
 
@@ -681,7 +681,7 @@ export type SessionKeys =
   | 'sessionPicker.title';
 
 /**
- * settings namespace의 번역 키 (529개)
+ * settings namespace의 번역 키 (535개)
  * 파일: locales/{lang}/settings.json
  */
 export type SettingsKeys =
@@ -703,6 +703,12 @@ export type SettingsKeys =
   | 'folderPicker.selectedPath'
   | 'folderPicker.validating'
   | 'folderPicker.validationError'
+  | 'settings.autoRefresh.description'
+  | 'settings.autoRefresh.enable'
+  | 'settings.autoRefresh.interval'
+  | 'settings.autoRefresh.intervalDesc'
+  | 'settings.autoRefresh.minutes'
+  | 'settings.autoRefresh.title'
   | 'settings.context.userWide'
   | 'settings.context.userWideDesc'
   | 'settings.customDirectories'
@@ -3206,6 +3212,12 @@ export type TranslationKey =
   | 'sessionPicker.empty'
   | 'sessionPicker.subtitle'
   | 'sessionPicker.title'
+  | 'settings.autoRefresh.description'
+  | 'settings.autoRefresh.enable'
+  | 'settings.autoRefresh.interval'
+  | 'settings.autoRefresh.intervalDesc'
+  | 'settings.autoRefresh.minutes'
+  | 'settings.autoRefresh.title'
   | 'settings.context.userWide'
   | 'settings.context.userWideDesc'
   | 'settings.customDirectories'

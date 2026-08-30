@@ -527,5 +527,11 @@
   "settings.wsl.scanning": "WSLをスキャン中...",
   "settings.wsl.slowWarning": "WSLファイルアクセスはネイティブより遅い場合があります",
   "settings.wsl.defaultBadge": "デフォルト",
-  "settings.wsl.detectError": "WSLディストリビューションの検出に失敗しました"
+  "settings.wsl.detectError": "WSLディストリビューションの検出に失敗しました",
+  "settings.autoRefresh.title": "セッションの自動更新",
+  "settings.autoRefresh.description": "ヘッダーの更新ボタンと同じ再読み込みを定期的に実行します。ネットワークドライブなど、ファイル監視がセッションファイルを検知できない環境で有効です。",
+  "settings.autoRefresh.enable": "自動的に更新する",
+  "settings.autoRefresh.interval": "更新間隔",
+  "settings.autoRefresh.intervalDesc": "1〜1440分の範囲で指定します。前回の更新が実行中の場合はスキップされます。",
+  "settings.autoRefresh.minutes": "分"
 }

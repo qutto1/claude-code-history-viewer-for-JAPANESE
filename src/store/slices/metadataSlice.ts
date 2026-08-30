@@ -14,7 +14,11 @@ import type {
   CustomClaudePath,
   WslSettings,
 } from "../../types";
-import { DEFAULT_USER_METADATA } from "../../types";
+import {
+  DEFAULT_USER_METADATA,
+  DEFAULT_SESSION_AUTO_REFRESH,
+  normalizeAutoRefreshInterval,
+} from "../../types";
 import { matchGlobPattern } from "../../utils/globUtils";
 import type { FullAppStore } from "./types";
 
@@ -79,6 +83,10 @@ export interface MetadataSliceActions {
   setWslEnabled: (enabled: boolean) => Promise<void>;
   /** Toggle a WSL distro in/out of the excluded list */
   toggleWslDistro: (distroName: string) => Promise<void>;
+  /** Enable or disable the periodic session refresh */
+  setSessionAutoRefreshEnabled: (enabled: boolean) => Promise<void>;
+  /** Set the periodic session refresh interval, in minutes */
+  setSessionAutoRefreshIntervalMinutes: (minutes: number) => Promise<void>;
   /** Clear metadata error */
   clearMetadataError: () => void;
 }
@@ -297,6 +305,28 @@ export const createMetadataSlice: StateCreator<
           ? { ...cp, label: label || undefined }
           : cp
       ),
+    });
+  },
+
+  setSessionAutoRefreshEnabled: async (enabled: boolean) => {
+    const current = get().userMetadata?.settings?.sessionAutoRefresh;
+    await get().updateUserSettings({
+      sessionAutoRefresh: {
+        enabled,
+        intervalMinutes: normalizeAutoRefreshInterval(
+          current?.intervalMinutes ?? DEFAULT_SESSION_AUTO_REFRESH.intervalMinutes
+        ),
+      },
+    });
+  },
+
+  setSessionAutoRefreshIntervalMinutes: async (minutes: number) => {
+    const current = get().userMetadata?.settings?.sessionAutoRefresh;
+    await get().updateUserSettings({
+      sessionAutoRefresh: {
+        enabled: current?.enabled ?? DEFAULT_SESSION_AUTO_REFRESH.enabled,
+        intervalMinutes: normalizeAutoRefreshInterval(minutes),
+      },
     });
   },
 

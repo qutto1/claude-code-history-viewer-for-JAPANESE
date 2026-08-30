@@ -343,6 +343,8 @@ export interface AppStoreActions {
     update: Partial<ProjectMetadata>
   ) => Promise<void>;
   updateUserSettings: (update: Partial<UserSettings>) => Promise<void>;
+  setSessionAutoRefreshEnabled: (enabled: boolean) => Promise<void>;
+  setSessionAutoRefreshIntervalMinutes: (minutes: number) => Promise<void>;
   getSessionDisplayName: (
     sessionId: string,
     fallbackSummary?: string

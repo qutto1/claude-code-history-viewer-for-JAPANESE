@@ -527,5 +527,11 @@
   "settings.wsl.scanning": "WSL 스캔 중...",
   "settings.wsl.slowWarning": "WSL 파일 접근은 네이티브보다 느릴 수 있습니다",
   "settings.wsl.defaultBadge": "기본값",
-  "settings.wsl.detectError": "WSL 배포판 감지에 실패했습니다"
+  "settings.wsl.detectError": "WSL 배포판 감지에 실패했습니다",
+  "settings.autoRefresh.title": "세션 자동 새로고침",
+  "settings.autoRefresh.description": "헤더의 새로고침 버튼과 동일한 다시 불러오기를 주기적으로 실행합니다. 네트워크 드라이브처럼 파일 감시가 세션 파일을 인식하지 못하는 환경에서 유용합니다.",
+  "settings.autoRefresh.enable": "자동으로 새로고침",
+  "settings.autoRefresh.interval": "새로고침 간격",
+  "settings.autoRefresh.intervalDesc": "1~1440분 사이로 지정합니다. 이전 새로고침이 진행 중이면 건너뜁니다.",
+  "settings.autoRefresh.minutes": "분"
 }

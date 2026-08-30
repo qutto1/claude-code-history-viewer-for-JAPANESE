@@ -217,6 +217,18 @@ pub struct WslSettings {
     pub excluded_distros: Vec<String>,
 }
 
+/// Periodic refresh of the selected session's messages
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionAutoRefreshSettings {
+    /// Whether the session list refreshes on a timer
+    #[serde(default)]
+    pub enabled: bool,
+    /// Interval between refreshes, in minutes
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval_minutes: Option<u32>,
+}
+
 /// Global user settings
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -244,6 +256,10 @@ pub struct UserSettings {
     /// WSL integration settings (Windows only)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wsl: Option<WslSettings>,
+
+    /// Periodic refresh of the selected session's messages
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_auto_refresh: Option<SessionAutoRefreshSettings>,
 
     /// Providers explicitly discovered by the user and allowed to scan on startup
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
