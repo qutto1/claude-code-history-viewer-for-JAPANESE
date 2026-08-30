@@ -227,9 +227,9 @@ describe('Tauri Configuration Tests', () => {
     });
 
     describe('Updater Plugin', () => {
-      it('should have updater plugin enabled', () => {
+      it('should keep the updater plugin switched off in this fork', () => {
         expect(config.plugins.updater).toBeDefined();
-        expect(config.plugins.updater.active).toBe(true);
+        expect(config.plugins.updater.active).toBe(false);
         expect(typeof config.plugins.updater.active).toBe('boolean');
       });
 
@@ -270,7 +270,9 @@ describe('Tauri Configuration Tests', () => {
     it('should have bundle configuration enabled', () => {
       expect(config.bundle.active).toBe(true);
       expect(config.bundle.targets).toBe('all');
-      expect(config.bundle.createUpdaterArtifacts).toBe(true);
+      // No updater means no updater artifacts, and this fork holds none of the
+      // signing secrets producing them would require.
+      expect(config.bundle.createUpdaterArtifacts).toBe(false);
     });
 
     it('should have valid icon file paths', () => {
