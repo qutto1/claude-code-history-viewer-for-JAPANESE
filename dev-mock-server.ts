@@ -153,17 +153,123 @@ const MOCK_PROJECT = {
   provider: "claude",
 };
 
+// A second project so the tree can be exercised with more than one row
+// expanded at a time.
+const MOCK_PROJECT_B = {
+  name: "mock-project-b",
+  path: "/mock/.claude/projects/-Users-mock-projects-mock-project-b",
+  actual_path: "/Users/mock/projects/mock-project-b",
+  session_count: 1,
+  message_count: 2,
+  last_modified: "2026-03-09T12:00:00.000Z",
+  provider: "claude",
+};
+
+const MOCK_SESSION_B = {
+  ...MOCK_SESSION,
+  session_id: "mock-session-002",
+  actual_session_id: "mock-session-002",
+  project_name: "mock-project-b",
+  file_path: "/mock/.claude/projects/-Users-mock-projects-mock-project-b/mock-session-b.jsonl",
+  message_count: 2,
+  last_modified: "2026-03-09T12:00:00.000Z",
+};
+
+const COMPACT_SUMMARY_TEXT = [
+  "This session is being continued from a previous conversation that ran out of context.",
+  "",
+  "Summary:",
+  "1. Primary Request and Intent:",
+  "   Tighten the viewer's spacing and make the compacted context readable.",
+  "2. Key Technical Concepts:",
+  "   - Virtualized message list with measured row heights",
+  "   - Per-project session pages in the store",
+  "3. Files and Code Sections:",
+  "   - `ClaudeMessageNode.tsx` — one frame-padding constant for every branch",
+  "   - `searchIndex.ts` — the index now honours the visibility toggles",
+].join("\n");
+
+// Extra rows used to eyeball the renderers: a compact boundary + its summary,
+// plus an assistant turn carrying thinking and tool blocks.
+const EXTRA_MESSAGES = [
+  {
+    uuid: "mock-compact-boundary",
+    parentUuid: null,
+    sessionId: "mock-session-001",
+    timestamp: "2026-03-10T17:00:00.000Z",
+    type: "system",
+    subtype: "compact_boundary",
+    content: "Conversation compacted",
+    level: "info",
+    compactMetadata: {
+      trigger: "manual",
+      preTokens: 464879,
+      postTokens: 20692,
+      durationMs: 113263,
+    },
+  },
+  {
+    uuid: "mock-compact-summary",
+    parentUuid: "mock-compact-boundary",
+    sessionId: "mock-session-001",
+    timestamp: "2026-03-10T17:00:01.000Z",
+    type: "user",
+    isCompactSummary: true,
+    content: COMPACT_SUMMARY_TEXT,
+    message: { role: "user", content: COMPACT_SUMMARY_TEXT },
+  },
+  {
+    uuid: "mock-thinking-and-tools",
+    parentUuid: "mock-compact-summary",
+    sessionId: "mock-session-001",
+    timestamp: "2026-03-10T17:01:00.000Z",
+    type: "assistant",
+    content: [
+      { type: "text", text: "Checking the spacing tokens now." },
+      { type: "thinking", thinking: "The frame padding is the searchable-thinking marker." },
+      { type: "tool_use", id: "toolu_mock", name: "Grep", input: { pattern: "searchable-tool marker" } },
+    ],
+  },
+];
+
+// Mutable so settings written through the UI survive within a dev session.
+const mockUserMetadata: {
+  version: number;
+  sessions: Record<string, unknown>;
+  projects: Record<string, unknown>;
+  settings: Record<string, unknown>;
+} = { version: 1, sessions: {}, projects: {}, settings: {} };
+
+/** Pick the session list matching the requested project path. */
+function sessionsFor(args: Record<string, unknown>) {
+  const path = typeof args.projectPath === "string" ? args.projectPath : "";
+  return path === MOCK_PROJECT_B.path ? [MOCK_SESSION_B] : [MOCK_SESSION];
+}
+
 /** API route handlers */
 const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_claude_folder_path: () => "/mock/.claude",
   validate_claude_folder: () => true,
-  scan_projects: () => [MOCK_PROJECT],
-  scan_all_projects: () => [MOCK_PROJECT],
+  scan_projects: () => [MOCK_PROJECT, MOCK_PROJECT_B],
+  scan_all_projects: () => [MOCK_PROJECT, MOCK_PROJECT_B],
   detect_providers: () => [{ id: "claude", name: "Claude Code", is_available: true, session_count: 1 }],
-  load_project_sessions: () => [MOCK_SESSION],
-  load_provider_sessions: () => [MOCK_SESSION],
-  load_session_messages: () => MOCK_MESSAGES,
-  load_provider_messages: () => MOCK_MESSAGES,
+  load_project_sessions: (args) => sessionsFor(args),
+  load_provider_sessions: (args) => sessionsFor(args),
+  load_provider_sessions_page: (args) => {
+    const sessions = sessionsFor(args);
+    return { sessions, total: sessions.length, nextOffset: sessions.length, hasMore: false };
+  },
+  load_session_messages: () => [...MOCK_MESSAGES, ...EXTRA_MESSAGES],
+  load_provider_messages: () => [...MOCK_MESSAGES, ...EXTRA_MESSAGES],
+  load_provider_messages_paginated: () => {
+    const messages = [...MOCK_MESSAGES, ...EXTRA_MESSAGES];
+    return {
+      messages,
+      total_count: messages.length,
+      has_more: false,
+      next_offset: messages.length,
+    };
+  },
   search_messages: () => [],
   get_session_token_stats: () => ({
     total_input_tokens: 12000,
@@ -198,8 +304,21 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
   get_all_mcp_servers: () => [],
   load_metadata: () => ({}),
   save_metadata: () => ({}),
-  load_user_metadata: () => ({ version: 1, sessions: {}, projects: {}, settings: {} }),
+  load_user_metadata: () => mockUserMetadata,
   save_user_metadata: () => ({}),
+  // Kept in memory so settings toggles round-trip during browser testing.
+  update_user_settings: (args) => {
+    const update = (args.update ?? args.settings ?? {}) as Record<string, unknown>;
+    mockUserMetadata.settings = { ...mockUserMetadata.settings, ...update };
+    return mockUserMetadata;
+  },
+  load_unified_presets: () => [],
+  get_all_settings: () => ({
+    user: JSON.stringify({ cleanupPeriodDays: 30 }, null, 2),
+    project: null,
+    local: null,
+    managed: null,
+  }),
   load_settings: () => null,
   save_settings: () => ({}),
   load_session_metadata: () => ({}),
