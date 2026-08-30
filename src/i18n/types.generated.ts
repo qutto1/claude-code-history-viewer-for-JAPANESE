@@ -5,8 +5,8 @@
  * 직접 수정하지 마세요.
  *
  * 생성 명령: pnpm run generate:i18n-types
- * 생성 시간: 2026-08-30T15:20:00.304Z
- * 총 키 개수: 1944
+ * 생성 시간: 2026-08-30T15:49:17.433Z
+ * 총 키 개수: 1957
  * Namespace 수: 11
  */
 
@@ -419,7 +419,7 @@ export type AnalyticsKeys =
   | 'analytics.weeklyActivity';
 
 /**
- * session namespace의 번역 키 (259개)
+ * session namespace의 번역 키 (272개)
  * 파일: locales/{lang}/session.json
  */
 export type SessionKeys =
@@ -438,9 +438,16 @@ export type SessionKeys =
   | 'project.currentSelection'
   | 'project.discoverProviders'
   | 'project.discoveringProviders'
+  | 'project.environment.all'
+  | 'project.environment.filterLabel'
+  | 'project.environment.menuLabel'
+  | 'project.environment.save'
+  | 'project.environment.unknown'
   | 'project.expandSidebar'
   | 'project.expandedSiblingGroups'
   | 'project.explorer'
+  | 'project.filterSaveError'
+  | 'project.filtersHideEverything'
   | 'project.globalStats'
   | 'project.globalStatsDescription'
   | 'project.groupingDirectory'
@@ -448,6 +455,7 @@ export type SessionKeys =
   | 'project.groupingWorktree'
   | 'project.hiddenPatterns'
   | 'project.hide'
+  | 'project.hideRoutine'
   | 'project.main'
   | 'project.notFound'
   | 'project.pathCopied'
@@ -456,7 +464,12 @@ export type SessionKeys =
   | 'project.pathUnavailableGroup'
   | 'project.pathUnavailablePath'
   | 'project.removePattern'
+  | 'project.resetFilters'
   | 'project.resetProviderFilters'
+  | 'project.routine.auto'
+  | 'project.routine.menuLabel'
+  | 'project.routine.off'
+  | 'project.routine.on'
   | 'project.searchPlaceholder'
   | 'project.selectToView'
   | 'project.title'
@@ -2849,9 +2862,16 @@ export type TranslationKey =
   | 'project.currentSelection'
   | 'project.discoverProviders'
   | 'project.discoveringProviders'
+  | 'project.environment.all'
+  | 'project.environment.filterLabel'
+  | 'project.environment.menuLabel'
+  | 'project.environment.save'
+  | 'project.environment.unknown'
   | 'project.expandSidebar'
   | 'project.expandedSiblingGroups'
   | 'project.explorer'
+  | 'project.filterSaveError'
+  | 'project.filtersHideEverything'
   | 'project.globalStats'
   | 'project.globalStatsDescription'
   | 'project.groupingDirectory'
@@ -2859,6 +2879,7 @@ export type TranslationKey =
   | 'project.groupingWorktree'
   | 'project.hiddenPatterns'
   | 'project.hide'
+  | 'project.hideRoutine'
   | 'project.main'
   | 'project.notFound'
   | 'project.pathCopied'
@@ -2867,7 +2888,12 @@ export type TranslationKey =
   | 'project.pathUnavailableGroup'
   | 'project.pathUnavailablePath'
   | 'project.removePattern'
+  | 'project.resetFilters'
   | 'project.resetProviderFilters'
+  | 'project.routine.auto'
+  | 'project.routine.menuLabel'
+  | 'project.routine.off'
+  | 'project.routine.on'
   | 'project.searchPlaceholder'
   | 'project.selectToView'
   | 'project.title'

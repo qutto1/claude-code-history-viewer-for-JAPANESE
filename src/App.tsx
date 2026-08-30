@@ -75,6 +75,8 @@ function App() {
     hideProject,
     unhideProject,
     isProjectHidden,
+    setProjectEnvironmentLabel,
+    setProjectRoutine,
     dateFilter,
     setDateFilter,
     isNavigatorOpen,
@@ -572,6 +574,8 @@ function App() {
       hideProject={hideProject}
       unhideProject={unhideProject}
       isProjectHidden={isProjectHidden}
+      setProjectEnvironmentLabel={setProjectEnvironmentLabel}
+      setProjectRoutine={setProjectRoutine}
       setDateFilter={setDateFilter}
       setSessionSearchQuery={setSessionSearchQuery}
       setSearchFilterType={setSearchFilterType}

@@ -37,6 +37,13 @@ export interface ProjectTreeProps {
   onHideProject?: (projectPath: string) => void;
   onUnhideProject?: (projectPath: string) => void;
   isProjectHidden?: (projectPath: string) => boolean;
+  // Manual environment classification — the logs record no hostname, so a
+  // second machine or a cloud runner can only be named by hand.
+  onSetProjectEnvironmentLabel?: (projectPath: string, label: string) => void;
+  onSetProjectRoutine?: (
+    projectPath: string,
+    routine: boolean | undefined
+  ) => void;
   // Collapse props
   isCollapsed?: boolean;
   onToggleCollapse?: () => void;

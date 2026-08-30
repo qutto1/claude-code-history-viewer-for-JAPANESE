@@ -1,6 +1,7 @@
 // src/components/ProjectTree/index.tsx
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Bot,
   Folder,
   Database,
   ChevronDown,
@@ -23,6 +24,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getLocale } from "../../utils/time";
 import { ProjectContextMenu } from "../ProjectContextMenu";
 import { useProjectTreeState } from "./hooks/useProjectTreeState";
@@ -43,6 +51,16 @@ import {
   normalizeProviderIds,
   PROVIDER_IDS,
 } from "../../utils/providers";
+import {
+  ALL_ENVIRONMENTS,
+  collectProjectEnvironments,
+  describeEnvironment,
+  getAutomaticEnvironment,
+} from "../../utils/projectEnvironment";
+import {
+  filterProjectTree,
+  matchesEnvironmentFilters,
+} from "./projectFilters";
 
 type ProviderTabId = "all" | ProviderId;
 
@@ -82,6 +100,8 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
   onHideProject,
   onUnhideProject,
   isProjectHidden,
+  onSetProjectEnvironmentLabel,
+  onSetProjectRoutine,
   isCollapsed = false,
   onToggleCollapse,
   asideId = "project-explorer",
@@ -96,6 +116,9 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
   const discoverProviders = useAppStore((state) => state.discoverProviders);
   const setActiveProviders = useAppStore((state) => state.setActiveProviders);
   const loadGlobalStats = useAppStore((state) => state.loadGlobalStats);
+  const projectMetadata = useAppStore((state) => state.userMetadata.projects);
+  const userSettings = useAppStore((state) => state.userMetadata.settings);
+  const updateUserSettings = useAppStore((state) => state.updateUserSettings);
   const clearProjectSelection = useAppStore(
     (state) => state.clearProjectSelection
   );
@@ -359,72 +382,95 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
     [normalizedSearchTerm]
   );
 
-  const filteredProjects = useMemo(
-    () => projects.filter((p) => matchesProviderFilter(p) && matchesSearch(p)),
-    [projects, matchesProviderFilter, matchesSearch]
+  // Environments are whatever the loaded history actually contains: the
+  // automatic categories its entrypoints produced, plus every label the user
+  // has written by hand. Nothing is hard-coded.
+  const environmentOptions = useMemo(
+    () => collectProjectEnvironments(projects, projectMetadata),
+    [projects, projectMetadata]
   );
 
-  const filteredDirectoryGroups = useMemo(() => {
-    const filterFn = (p: (typeof projects)[number]) =>
-      matchesProviderFilter(p) && matchesSearch(p);
+  // A stored selection can outlive the projects that produced it (a renamed
+  // label, a machine whose projects are gone). Fall back to "all" for the
+  // session rather than filtering against an option nothing can match.
+  const environmentFilter = useMemo(() => {
+    const stored = userSettings.environmentFilter ?? ALL_ENVIRONMENTS;
+    return stored === ALL_ENVIRONMENTS ||
+      environmentOptions.some((option) => option.id === stored)
+      ? stored
+      : ALL_ENVIRONMENTS;
+  }, [environmentOptions, userSettings.environmentFilter]);
 
-    if (isAllProvidersSelected && !normalizedSearchTerm) {
-      return directoryGroups;
-    }
+  const hideRoutineProjects = userSettings.hideRoutineProjects ?? false;
 
-    return directoryGroups
-      .map((group) => ({
-        ...group,
-        projects: group.projects.filter(filterFn),
-      }))
-      .filter((group) => group.projects.length > 0);
-  }, [directoryGroups, isAllProvidersSelected, matchesProviderFilter, matchesSearch, normalizedSearchTerm]);
+  const matchesEnvironment = useCallback(
+    (project: ClaudeProject) =>
+      matchesEnvironmentFilters(project, {
+        environment: environmentFilter,
+        hideRoutine: hideRoutineProjects,
+        metadata: projectMetadata,
+      }),
+    [environmentFilter, hideRoutineProjects, projectMetadata]
+  );
 
-  const { filteredWorktreeGroups, filteredUngroupedProjects } = useMemo(() => {
-    const baseUngrouped = ungroupedProjects ?? projects;
-    const filterFn = (p: (typeof projects)[number]) =>
-      matchesProviderFilter(p) && matchesSearch(p);
+  const {
+    projects: filteredProjects,
+    directoryGroups: filteredDirectoryGroups,
+    worktreeGroups: filteredWorktreeGroups,
+    ungroupedProjects: filteredUngroupedProjects,
+  } = useMemo(
+    () =>
+      filterProjectTree({
+        projects,
+        directoryGroups,
+        worktreeGroups,
+        ungroupedProjects,
+        matches: (project) =>
+          matchesProviderFilter(project) &&
+          matchesSearch(project) &&
+          matchesEnvironment(project),
+        isHidden: (project) => isProjectHidden?.(project.actual_path) ?? false,
+      }),
+    [
+      projects,
+      directoryGroups,
+      worktreeGroups,
+      ungroupedProjects,
+      matchesProviderFilter,
+      matchesSearch,
+      matchesEnvironment,
+      isProjectHidden,
+    ]
+  );
 
-    if (isAllProvidersSelected && !normalizedSearchTerm) {
-      return {
-        filteredWorktreeGroups: worktreeGroups,
-        filteredUngroupedProjects: baseUngrouped,
-      };
-    }
+  const hasActiveFilters =
+    !isAllProvidersSelected ||
+    normalizedSearchTerm.length > 0 ||
+    environmentFilter !== ALL_ENVIRONMENTS ||
+    hideRoutineProjects;
 
-    const nextGroups: typeof worktreeGroups = [];
-    const movedChildren: (typeof projects)[number][] = [];
-
-    for (const group of worktreeGroups) {
-      const includeParent = filterFn(group.parent);
-      const matchingChildren = group.children.filter(filterFn);
-
-      if (includeParent) {
-        nextGroups.push({
-          ...group,
-          children: matchingChildren,
-        });
-      } else if (matchingChildren.length > 0) {
-        movedChildren.push(...matchingChildren);
+  const persistProjectFilters = useCallback(
+    async (update: { environmentFilter?: string; hideRoutineProjects?: boolean }) => {
+      try {
+        await updateUserSettings(update);
+      } catch (error) {
+        console.error("Failed to save project filters:", error);
+        toast.error(
+          t("project.filterSaveError", "Could not save the project filter")
+        );
       }
-    }
+    },
+    [t, updateUserSettings]
+  );
 
-    const baseFiltered = baseUngrouped.filter(filterFn);
-    const seenPaths = new Set(baseFiltered.map((project) => project.path));
-    const movedChildrenToAdd = movedChildren.filter((child) => {
-      if (seenPaths.has(child.path)) {
-        return false;
-      }
-      seenPaths.add(child.path);
-      return true;
+  const handleResetFilters = useCallback(() => {
+    setSearchTerm("");
+    void applyProviderSelection(selectableProviderIds);
+    void persistProjectFilters({
+      environmentFilter: ALL_ENVIRONMENTS,
+      hideRoutineProjects: false,
     });
-    const nextUngrouped = [...baseFiltered, ...movedChildrenToAdd];
-
-    return {
-      filteredWorktreeGroups: nextGroups,
-      filteredUngroupedProjects: nextUngrouped,
-    };
-  }, [worktreeGroups, ungroupedProjects, projects, isAllProvidersSelected, matchesProviderFilter, matchesSearch, normalizedSearchTerm]);
+  }, [applyProviderSelection, persistProjectFilters, selectableProviderIds]);
 
   const providerTabs = useMemo(
     () => {
@@ -1041,6 +1087,56 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
               </div>
             </CollapsibleContent>
           </Collapsible>
+
+          {/* Execution environment + routine filters */}
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <Select
+              value={environmentFilter}
+              onValueChange={(value) => {
+                void persistProjectFilters({ environmentFilter: value });
+              }}
+            >
+              <SelectTrigger
+                className="h-7 min-w-0 flex-1 text-px10 bg-muted/20 border-border/30 px-2"
+                aria-label={t("project.environment.filterLabel", "Environment")}
+                title={t("project.environment.filterLabel", "Environment")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  value={ALL_ENVIRONMENTS}
+                  className="text-px10 font-extrabold text-foreground uppercase tracking-wide"
+                >
+                  {t("project.environment.all", "All environments")}
+                </SelectItem>
+                {environmentOptions.map((option) => (
+                  <SelectItem key={option.id} value={option.id} className="text-px10">
+                    {describeEnvironment(option, (key, fallback) => t(key, fallback))}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <button
+              type="button"
+              onClick={() => {
+                void persistProjectFilters({
+                  hideRoutineProjects: !hideRoutineProjects,
+                });
+              }}
+              aria-pressed={hideRoutineProjects}
+              className={cn(
+                "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border transition-colors",
+                hideRoutineProjects
+                  ? "border-accent/30 bg-accent/15 text-accent"
+                  : "border-transparent bg-muted/30 text-muted-foreground hover:bg-accent/8 hover:text-accent"
+              )}
+              title={t("project.hideRoutine", "Hide routine projects")}
+              aria-label={t("project.hideRoutine", "Hide routine projects")}
+            >
+              <Bot className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
 
         {/* Search */}
@@ -1094,7 +1190,27 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
               <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-muted/30 flex items-center justify-center">
                 <Folder className="w-8 h-8 text-muted-foreground/40" />
               </div>
-              <p className="text-sm text-muted-foreground">{t("project.notFound")}</p>
+              <p className="text-sm text-muted-foreground">
+                {hasActiveFilters
+                  ? t(
+                      "project.filtersHideEverything",
+                      "No projects match the current filters"
+                    )
+                  : t("project.notFound")}
+              </p>
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className={cn(
+                    "mt-3 inline-flex items-center gap-1.5 rounded-md border border-accent/20 bg-accent/5 px-2 py-1",
+                    "text-2xs font-medium text-accent transition-colors hover:bg-accent/10"
+                  )}
+                >
+                  <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                  <span>{t("project.resetFilters", "Reset filters")}</span>
+                </button>
+              )}
             </div>
           ) : (
             <div
@@ -1211,12 +1327,27 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
       {/* Context Menu */}
       {contextMenu && onHideProject && onUnhideProject && isProjectHidden && (
         <ProjectContextMenu
+          // The menu holds a draft of the environment label, so re-opening it
+          // on another project must start that draft over.
+          key={contextMenu.project.path}
           project={contextMenu.project}
           position={contextMenu.position}
           onClose={closeContextMenu}
           onHide={onHideProject}
           onUnhide={onUnhideProject}
           isHidden={isProjectHidden(contextMenu.project.actual_path)}
+          environmentLabel={
+            projectMetadata[contextMenu.project.actual_path]?.environmentLabel
+          }
+          automaticEnvironmentLabel={describeEnvironment(
+            getAutomaticEnvironment(contextMenu.project),
+            (key, fallback) => t(key, fallback)
+          )}
+          routineOverride={
+            projectMetadata[contextMenu.project.actual_path]?.routine
+          }
+          onSetEnvironmentLabel={onSetProjectEnvironmentLabel}
+          onSetRoutine={onSetProjectRoutine}
         />
       )}
     </aside>

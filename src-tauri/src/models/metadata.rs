@@ -264,6 +264,15 @@ pub struct UserSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub grouping_mode: Option<String>,
 
+    /// Hide projects classified as automated/routine work
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hide_routine_projects: Option<bool>,
+
+    /// Narrows the project list to one execution environment; "all" or absent
+    /// disables the filter
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment_filter: Option<String>,
+
     /// Additional Claude configuration directories to scan
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_claude_paths: Vec<CustomClaudePath>,

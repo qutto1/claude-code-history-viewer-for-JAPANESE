@@ -20,7 +20,7 @@ import {
   normalizeAutoRefreshInterval,
 } from "../../types";
 import { matchGlobPattern } from "../../utils/globUtils";
-import { normalizeEntrypoint } from "../../utils/entrypoint";
+import { resolveProjectRoutine } from "../../utils/projectEnvironment";
 import type { FullAppStore } from "./types";
 
 // ============================================================================
@@ -268,12 +268,12 @@ export const createMetadataSlice: StateCreator<
 
     // A hand-set answer always wins, including an explicit "no": the user is
     // the only source of truth about a second machine or a cloud environment.
-    const override = userMetadata.projects[projectPath]?.routine;
-    if (override !== undefined) {
-      return override;
-    }
-
-    return normalizeEntrypoint(entrypoint) === "sdk";
+    // The project list answers the same question without the store, so the
+    // rule itself lives next to the rest of the environment classification.
+    return resolveProjectRoutine(
+      userMetadata.projects[projectPath]?.routine,
+      entrypoint
+    );
   },
 
   setProjectRoutine: async (

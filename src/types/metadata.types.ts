@@ -76,6 +76,14 @@ export interface UserSettings {
   worktreeGroupingUserSet?: boolean;
   /** Project tree grouping mode: none, worktree, or directory */
   groupingMode?: GroupingMode;
+  /** Hide projects classified as automated/routine work. Default off. */
+  hideRoutineProjects?: boolean;
+  /**
+   * Narrows the project list to one execution environment. Holds an
+   * environment id from `utils/projectEnvironment`; "all" (or absent)
+   * disables the filter.
+   */
+  environmentFilter?: string;
 }
 
 /** Root structure for all user metadata */

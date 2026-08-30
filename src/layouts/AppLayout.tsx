@@ -133,6 +133,14 @@ export interface AppLayoutProps {
   hideProject: (projectPath: string) => Promise<void>;
   unhideProject: (projectPath: string) => Promise<void>;
   isProjectHidden: (projectPath: string) => boolean;
+  setProjectEnvironmentLabel: (
+    projectPath: string,
+    label: string | undefined
+  ) => Promise<void>;
+  setProjectRoutine: (
+    projectPath: string,
+    routine: boolean | undefined
+  ) => Promise<void>;
   setDateFilter: (filter: { start: Date | null; end: Date | null }) => void;
   setSessionSearchQuery: (query: string) => void;
   setSearchFilterType: (type: SearchFilterType) => void;
@@ -217,6 +225,8 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
     hideProject,
     unhideProject,
     isProjectHidden,
+    setProjectEnvironmentLabel,
+    setProjectRoutine,
     setDateFilter,
     setSessionSearchQuery,
     setSearchFilterType,
@@ -491,6 +501,8 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
                 onHideProject={hideProject}
                 onUnhideProject={unhideProject}
                 isProjectHidden={isProjectHidden}
+                onSetProjectEnvironmentLabel={setProjectEnvironmentLabel}
+                onSetProjectRoutine={setProjectRoutine}
                 onClose={() => setIsMobileSidebarOpen(false)}
                 asideId="project-explorer"
               />
@@ -529,6 +541,8 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
                 onHideProject={hideProject}
                 onUnhideProject={unhideProject}
                 isProjectHidden={isProjectHidden}
+                onSetProjectEnvironmentLabel={setProjectEnvironmentLabel}
+                onSetProjectRoutine={setProjectRoutine}
                 isCollapsed={isSidebarCollapsed}
                 onToggleCollapse={handleToggleSidebar}
                 asideId="project-explorer"
