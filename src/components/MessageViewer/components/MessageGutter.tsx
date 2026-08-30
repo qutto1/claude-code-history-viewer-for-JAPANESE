@@ -10,11 +10,17 @@
  * model id, the token breakdown — lives one hover away in a tooltip.
  */
 
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { HelpCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import {
+  HoverCard,
+  HoverCardTrigger,
+  HoverCardContent,
+  HoverCardArrow,
+} from "@/components/ui/hover-card";
 import { formatTime, formatTimeShort } from "../../../utils/time";
 import { getShortModelName } from "../../../utils/model";
 import { getToolName } from "../../../utils/toolUtils";
@@ -43,23 +49,48 @@ const formatLatency = (ms: number): string => {
 
 export const MessageGutter: React.FC<MessageGutterProps> = ({ message }) => {
   const { t } = useTranslation();
-  const [isTooltipOpen, setIsTooltipOpen] = useState(false);
-  const tooltipRef = useRef<HTMLDivElement>(null);
+  // Hovering opens the details card; clicking pins it so it survives the
+  // pointer leaving. "Pinned" is a ref, not state: nothing renders from it, and
+  // the pointerdown handler that reads it runs before React would have
+  // re-rendered with a fresh closure.
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const isPinnedRef = useRef(false);
+  const detailsTriggerRef = useRef<HTMLButtonElement>(null);
 
-  const handleTooltipToggle = useCallback(() => {
-    setIsTooltipOpen((prev) => !prev);
+  const handleDetailsOpenChange = useCallback((open: boolean) => {
+    // A pinned card ignores the close that pointer-leave asks for.
+    if (!open && isPinnedRef.current) return;
+    setIsDetailsOpen(open);
   }, []);
 
-  useEffect(() => {
-    if (!isTooltipOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (tooltipRef.current && !tooltipRef.current.contains(e.target as Node)) {
-        setIsTooltipOpen(false);
+  const closeDetails = useCallback(() => {
+    isPinnedRef.current = false;
+    setIsDetailsOpen(false);
+  }, []);
+
+  const handleTooltipToggle = useCallback(() => {
+    if (isPinnedRef.current) {
+      // Unpin only. The pointer is still on the trigger, so the card stays up
+      // until it leaves — the same as the old hover-driven behaviour.
+      isPinnedRef.current = false;
+      return;
+    }
+    isPinnedRef.current = true;
+    setIsDetailsOpen(true);
+  }, []);
+
+  const handleDetailsPointerDownOutside = useCallback(
+    (event: { target: EventTarget | null; preventDefault: () => void }) => {
+      // The trigger counts as "outside" the card, and its own click already
+      // toggles the pin — let that be the single source of truth.
+      if (detailsTriggerRef.current?.contains(event.target as Node)) {
+        event.preventDefault();
+        return;
       }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isTooltipOpen]);
+      closeDetails();
+    },
+    [closeDetails]
+  );
 
   const isToolResultMessage =
     (message.type === "user" || message.type === "assistant") &&
@@ -122,10 +153,7 @@ export const MessageGutter: React.FC<MessageGutterProps> = ({ message }) => {
       {shortModelName && <div className="truncate">{shortModelName}</div>}
 
       {(messageCost != null || hasDetails) && (
-        <div
-          ref={tooltipRef}
-          className="relative group flex items-center justify-end gap-0.5"
-        >
+        <div className="flex items-center justify-end gap-0.5">
           {messageCost != null && (
             <span
               className={cn(
@@ -137,26 +165,39 @@ export const MessageGutter: React.FC<MessageGutterProps> = ({ message }) => {
             </span>
           )}
           {hasDetails && (
-            <>
-              <button
-                type="button"
-                onClick={handleTooltipToggle}
-                className="inline-flex items-center justify-center cursor-help text-muted-foreground"
-                aria-label={t("assistantMessageDetails.tokenUsageLabel")}
+            /* Portalled, not absolutely positioned: the gutter lives inside a
+               virtualized row, so an in-place panel is clipped by the scroll
+               container above the first rows and painted over by later rows
+               below them — each row opens its own stacking context, so no
+               z-index on the panel can win. Radix anchors it with fixed
+               coordinates off the trigger's rect and flips/shifts it to stay in
+               the viewport. */
+            <HoverCard
+              open={isDetailsOpen}
+              onOpenChange={handleDetailsOpenChange}
+              openDelay={0}
+              closeDelay={120}
+            >
+              <HoverCardTrigger asChild>
+                <button
+                  type="button"
+                  ref={detailsTriggerRef}
+                  onClick={handleTooltipToggle}
+                  className="inline-flex items-center justify-center cursor-help text-muted-foreground"
+                  aria-label={t("assistantMessageDetails.tokenUsageLabel")}
+                  aria-expanded={isDetailsOpen}
+                >
+                  <HelpCircle className="w-2.5 h-2.5" />
+                </button>
+              </HoverCardTrigger>
+              <HoverCardContent
+                side="top"
+                align="start"
+                sideOffset={4}
+                className="w-52 p-2.5 text-left text-xs shadow-lg"
+                onPointerDownOutside={handleDetailsPointerDownOutside}
+                onEscapeKeyDown={closeDetails}
               >
-                <HelpCircle className="w-2.5 h-2.5" />
-              </button>
-              {/* Anchored left, not right: the panel is wider than the gutter,
-                  so the old right-0 anchor pushed it off the left edge of the
-                  window. It still opens upward — each virtualized row is its own
-                  stacking context, so a panel that overhangs downward is painted
-                  over by the rows below it. */}
-              <div className={cn(
-                "absolute bottom-full mb-1 left-0 w-52 bg-popover text-popover-foreground",
-                "text-left text-xs rounded-md p-2.5",
-                "transition-opacity shadow-lg z-10 border border-border",
-                isTooltipOpen ? "opacity-100 pointer-events-auto" : "opacity-0 group-hover:opacity-100 pointer-events-none"
-              )}>
                 <p className="mb-1"><strong>{t("assistantMessageDetails.model")}:</strong> {assistant?.model}</p>
                 {usage?.input_tokens ? <p>{t("assistantMessageDetails.input")}: {usage.input_tokens.toLocaleString()}</p> : null}
                 {usage?.output_tokens ? <p>{t("assistantMessageDetails.output")}: {usage.output_tokens.toLocaleString()}</p> : null}
@@ -170,9 +211,9 @@ export const MessageGutter: React.FC<MessageGutterProps> = ({ message }) => {
                     {messageCost.isEstimated ? <span className="ml-1 opacity-70">({t("assistantMessageDetails.estimated")})</span> : null}
                   </p>
                 )}
-                <div className="absolute left-4 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-popover"></div>
-              </div>
-            </>
+                <HoverCardArrow className="fill-popover" width={10} height={5} />
+              </HoverCardContent>
+            </HoverCard>
           )}
         </div>
       )}
