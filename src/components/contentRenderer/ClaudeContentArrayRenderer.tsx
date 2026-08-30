@@ -161,8 +161,12 @@ export const ClaudeContentArrayRenderer = memo(({
     return null;
   }
 
+  // `empty:hidden` carries the "nothing survived the skip flags" case: when every
+  // entry renders null (an assistant text row whose text is already shown by
+  // MessageContentDisplay, for instance) the div has no child nodes, so it and
+  // its bottom margin drop out of the layout instead of leaving dead space.
   return (
-    <div className="space-y-1 text-px12">
+    <div className="space-y-1 text-px12 mb-1 empty:hidden">
       {normalizedContent.map((entry) => {
         if (entry.kind === "toolExecution") {
           if (skipToolCalls) return null;

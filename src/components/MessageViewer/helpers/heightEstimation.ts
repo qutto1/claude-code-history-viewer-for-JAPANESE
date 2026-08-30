@@ -7,20 +7,24 @@
 import type { FlattenedMessage } from "../types";
 import { isEmptyMessage } from "./messageHelpers";
 
-// Default heights by message type (in pixels)
+// Default heights by message type (in pixels).
+// These are first-paint guesses only — react-virtual re-measures every row via
+// measureElement — but a guess that is far too tall makes the scrollbar lurch
+// once the real heights arrive. They are sized against the compact frame
+// (a plain row is ~50px), not the roomier pre-density layout.
 const HEIGHT_DEFAULTS = {
-  summary: 56,
+  summary: 40,
   // Collapsed /compact card — its body is ~16k chars, so it must never be
   // estimated from content length or the virtual list jumps on first paint.
-  compactSummary: 56,
-  progress: 40,
-  agentTaskGroup: 130,
-  agentProgressGroup: 100,
-  toolResult: 176,
-  assistant: 150,
-  user: 92,
-  system: 76,
-  default: 92,
+  compactSummary: 40,
+  progress: 28,
+  agentTaskGroup: 72,
+  agentProgressGroup: 56,
+  toolResult: 76,
+  assistant: 56,
+  user: 48,
+  system: 40,
+  default: 48,
   // Hidden group members
   hidden: 0,
 } as const;

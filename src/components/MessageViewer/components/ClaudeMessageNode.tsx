@@ -39,7 +39,7 @@ const SELECTED_BG = "bg-blue-500/10 ring-1 ring-blue-500/40";
 
 // Message frame padding — single source of truth so density stays consistent
 // across every branch below (task groups, progress, system, and normal rows).
-const NODE_FRAME = "relative w-full px-1.5 md:px-2.5 py-0.5 transition-all duration-200";
+const NODE_FRAME = "relative w-full px-1.5 md:px-2.5 py-0 transition-all duration-200";
 
 // Click priority: interactive elements take precedence over capture selection
 const INTERACTIVE_SELECTOR = "button, a, summary, input, select, textarea, [role='button']";
@@ -452,25 +452,23 @@ export const ClaudeMessageNode = React.memo(({
 
             {message.content &&
               Array.isArray(message.content) && (
-                <div className="mb-1">
-                  <ClaudeContentArrayRenderer
-                    content={message.content}
-                    searchQuery={searchQuery}
-                    filterType={filterType}
-                    isCurrentMatch={isCurrentMatch}
-                    currentMatchIndex={currentMatchIndex}
-                    skipToolResults={shouldRenderLegacyToolResult}
-                    skipText={
-                      (message.type === "assistant" && !messageFilter.contentTypes.text) ||
-                      (message.type === "assistant" &&
-                      !!extractClaudeMessageContent(message))
-                    }
-                    skipThinking={message.type === "assistant" && !messageFilter.contentTypes.thinking}
-                    skipCommands={message.type === "assistant" && !messageFilter.contentTypes.commands}
-                    skipToolCalls={message.type === "assistant" && !messageFilter.contentTypes.toolCalls}
-                    onViewSubagent={handleViewSubagent}
-                  />
-                </div>
+                <ClaudeContentArrayRenderer
+                  content={message.content}
+                  searchQuery={searchQuery}
+                  filterType={filterType}
+                  isCurrentMatch={isCurrentMatch}
+                  currentMatchIndex={currentMatchIndex}
+                  skipToolResults={shouldRenderLegacyToolResult}
+                  skipText={
+                    (message.type === "assistant" && !messageFilter.contentTypes.text) ||
+                    (message.type === "assistant" &&
+                    !!extractClaudeMessageContent(message))
+                  }
+                  skipThinking={message.type === "assistant" && !messageFilter.contentTypes.thinking}
+                  skipCommands={message.type === "assistant" && !messageFilter.contentTypes.commands}
+                  skipToolCalls={message.type === "assistant" && !messageFilter.contentTypes.toolCalls}
+                  onViewSubagent={handleViewSubagent}
+                />
               )}
 
             {messageFilter.contentTypes.toolCalls &&

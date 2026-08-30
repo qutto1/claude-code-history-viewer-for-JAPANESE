@@ -71,7 +71,7 @@ const RendererWrapper = ({
     <ContentProvider hasError={hasError} enableToggle={enableToggle} expandKey={expandKey} autoExpand={autoExpand}>
       <div
         className={cn(
-          "mt-1.5 border border-border overflow-hidden",
+          "mt-0.5 border border-border overflow-hidden",
           layout.rounded,
           className,
           hasError && "bg-destructive/10 border-destructive/50"

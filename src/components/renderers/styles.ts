@@ -195,7 +195,7 @@ export function getVariantStyles(variant: RendererVariant): VariantStyles {
  * - iconSize: 16x16px (standard)
  * - iconSizeSmall: 12x12px (badges)
  * - titleText/bodyText/smallText: 12px
- * - headerHeight: 24px minimum (grows when content wraps)
+ * - headerHeight: 20px minimum (grows when content wraps)
  * - rounded: 6px border radius
  * - codeMaxHeight: 256px
  * - contentMaxHeight: 384px
@@ -205,8 +205,8 @@ export const layout = {
   containerPadding: "p-1.5",
   /** Header padding (for collapsible headers) */
   headerPadding: "px-2 py-0.5",
-  /** Header minimum height (24px, grows when content wraps) */
-  headerHeight: "min-h-6",
+  /** Header minimum height (20px = 16px icon + 2px padding each side) */
+  headerHeight: "min-h-5",
   /** Content padding (inside expanded content) */
   contentPadding: "px-2 pb-1.5",
   /** Gap between icon and text */

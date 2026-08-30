@@ -769,6 +769,18 @@
     border: none !important;
     border-radius: 0 !important;
   }
+
+  /* Collapse the leading/trailing margin of a markdown block so a card's own
+     padding is the only vertical space around it. Every rule above (p, ul, ol,
+     pre, blockquote, table, img, h*) uses `!important` at the same specificity,
+     so this reset has to come last in the block to win the cascade. */
+  .prose>:first-child {
+    margin-top: 0 !important;
+  }
+
+  .prose>:last-child {
+    margin-bottom: 0 !important;
+  }
 }
 
 /* ============================================
@@ -1572,9 +1584,8 @@
 
   /* === Fixed pixel text sizes, made reactive to --app-font-scale (issue #408) ===
      These replace arbitrary `text-[Npx]` classes, which compile to a literal
-     font-size and so ignore the app font-size setting. They set font-size only —
-     matching the original arbitrary-value behavior — so appearance is unchanged
-     except that they now scale with the user's font-size preference. */
+     font-size and so ignore the app font-size setting, so they now scale with
+     the user's font-size preference. */
   .text-px6 {
     font-size: calc(0.375rem * var(--app-font-scale));
   }
@@ -1598,6 +1609,14 @@
   }
   .text-px14 {
     font-size: calc(0.875rem * var(--app-font-scale));
+  }
+
+  /* Tight line box for the card sizes. Preflight's inherited line-height of 1.5
+     puts 12px text in an 18px box, so every line of dense card text pays 6px it
+     does not need. `:where()` keeps this at zero specificity: it beats the
+     inherited value but still loses to an explicit `leading-*` utility. */
+  :where(.text-px10, .text-px11, .text-px12, .text-px13, .text-px14) {
+    line-height: 1.35;
   }
 
   /* === Text Wrapping === */

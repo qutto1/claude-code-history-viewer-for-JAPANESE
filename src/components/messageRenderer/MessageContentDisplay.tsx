@@ -200,7 +200,7 @@ export const MessageContentDisplay: React.FC<MessageContentDisplayProps> = ({
     const displayContent = showPreview ? textInfo.preview : content;
 
     return (
-      <div className="mb-1 flex justify-end">
+      <div className="flex justify-end">
         <div className="max-w-[85%] md:max-w-md lg:max-w-lg bg-accent text-accent-foreground rounded-xl px-2.5 py-1.5 relative group shadow-sm">
           <div className={cn(
             "whitespace-pre-wrap break-words",
@@ -257,7 +257,7 @@ export const MessageContentDisplay: React.FC<MessageContentDisplayProps> = ({
     const displayContent = showPreview ? textInfo.preview : content;
 
     return (
-      <div className="mb-1 flex justify-start">
+      <div className="flex justify-start">
         <div className="max-w-[95%] md:max-w-2xl bg-secondary text-secondary-foreground rounded-xl px-2.5 py-1.5 relative group shadow-sm border border-border">
           {/* 검색 중일 때는 plain text로 렌더링 (성능 + 하이라이팅) */}
           {searchQuery ? (
