@@ -16,6 +16,9 @@ function makeUuid(): string {
   });
 }
 
+/** Counts assistant turns so their usage figures vary the way real ones do. */
+let assistantTurn = 0;
+
 function makeMessage(
   type: "user" | "assistant",
   content: string,
@@ -23,6 +26,7 @@ function makeMessage(
   parentUuid?: string,
 ) {
   const uuid = makeUuid();
+  const index = type === "assistant" ? assistantTurn++ : assistantTurn;
   return {
     uuid,
     parentUuid: parentUuid ?? null,
@@ -39,14 +43,9 @@ function makeMessage(
       ...(type === "assistant"
         ? {
             id: `msg_${uuid.slice(0, 8)}`,
-            model: "claude-sonnet-4-20250514",
+            model: mockModel(index),
             stop_reason: "end_turn",
-            usage: {
-              input_tokens: 1200,
-              output_tokens: 350,
-              cache_creation_input_tokens: 0,
-              cache_read_input_tokens: 0,
-            },
+            usage: mockUsage(index),
           }
         : {}),
     },
@@ -54,16 +53,38 @@ function makeMessage(
       type === "assistant"
         ? [{ type: "text", text: content }]
         : content,
-    model: type === "assistant" ? "claude-sonnet-4-20250514" : undefined,
-    usage:
-      type === "assistant"
-        ? {
-            input_tokens: 1200,
-            output_tokens: 350,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-          }
-        : undefined,
+    model: type === "assistant" ? mockModel(index) : undefined,
+    usage: type === "assistant" ? mockUsage(index) : undefined,
+  };
+}
+
+/**
+ * Real transcripts are dominated by cache traffic, not by fresh input: a turn
+ * routinely reads tens of thousands of cached tokens and writes them back on a
+ * one-hour TTL, while `input_tokens` stays in single digits. Costing a turn off
+ * `input_tokens` alone therefore reads as ~$0 on every real session, so the
+ * fixtures have to carry the same shape or the gutter's cost line cannot be
+ * seen to work at all. Every tenth turn is deliberately expensive enough to
+ * cross the $3 mark that renders red.
+ */
+function mockModel(index: number): string {
+  if (index % 10 === 4) return "claude-opus-5";
+  return index % 3 === 0 ? "claude-sonnet-5" : "claude-sonnet-4-20250514";
+}
+
+function mockUsage(index: number) {
+  const expensive = index % 10 === 4;
+  const cacheWrite1h = expensive ? 400_000 : 8_000 + index * 400;
+  return {
+    input_tokens: expensive ? 6 : 1_200,
+    output_tokens: expensive ? 4_800 : 350,
+    cache_creation_input_tokens: cacheWrite1h,
+    cache_read_input_tokens: expensive ? 120_000 : 24_000 + index * 900,
+    cache_creation: {
+      ephemeral_5m_input_tokens: 0,
+      ephemeral_1h_input_tokens: cacheWrite1h,
+    },
+    service_tier: "standard",
   };
 }
 
@@ -151,10 +172,12 @@ const MOCK_PROJECT = {
   message_count: MOCK_MESSAGES.length,
   last_modified: "2026-03-10T16:02:00.000Z",
   provider: "claude",
+  entrypoint: "claude-desktop",
 };
 
 // A second project so the tree can be exercised with more than one row
-// expanded at a time.
+// expanded at a time. Its entrypoint is the headless SDK one, so it also
+// stands in for the "routine" case the environment filter has to hide.
 const MOCK_PROJECT_B = {
   name: "mock-project-b",
   path: "/mock/.claude/projects/-Users-mock-projects-mock-project-b",
@@ -163,6 +186,7 @@ const MOCK_PROJECT_B = {
   message_count: 2,
   last_modified: "2026-03-09T12:00:00.000Z",
   provider: "claude",
+  entrypoint: "sdk-cli",
 };
 
 const MOCK_SESSION_B = {
