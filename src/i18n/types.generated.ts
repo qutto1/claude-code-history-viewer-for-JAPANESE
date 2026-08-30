@@ -5,8 +5,8 @@
  * 직접 수정하지 마세요.
  *
  * 생성 명령: pnpm run generate:i18n-types
- * 생성 시간: 2026-08-30T14:51:08.668Z
- * 총 키 개수: 1941
+ * 생성 시간: 2026-08-30T15:00:33.188Z
+ * 총 키 개수: 1942
  * Namespace 수: 11
  */
 
@@ -1451,7 +1451,7 @@ export type MessageKeys =
   | 'navigator.userOnly';
 
 /**
- * renderers namespace의 번역 키 (398개)
+ * renderers namespace의 번역 키 (399개)
  * 파일: locales/{lang}/renderers.json
  */
 export type RenderersKeys =
@@ -1575,6 +1575,7 @@ export type RenderersKeys =
   | 'commandRenderer.status'
   | 'commandRenderer.systemNote'
   | 'commandRenderer.unknownContentType'
+  | 'compactSummaryRenderer.copyAll'
   | 'compactSummaryRenderer.preview'
   | 'compactSummaryRenderer.title'
   | 'contentArray.cacheCreation'
@@ -2518,6 +2519,7 @@ export type TranslationKey =
   | 'common.watcher.startError'
   | 'common.watcher.stopError'
   | 'common.watcher.watching'
+  | 'compactSummaryRenderer.copyAll'
   | 'compactSummaryRenderer.preview'
   | 'compactSummaryRenderer.title'
   | 'contentArray.cacheCreation'

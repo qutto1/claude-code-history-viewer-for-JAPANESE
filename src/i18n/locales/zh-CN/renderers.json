@@ -119,6 +119,7 @@
   "commandRenderer.status": "状态:",
   "commandRenderer.systemNote": "系统备注",
   "commandRenderer.unknownContentType": "未知内容类型",
+  "compactSummaryRenderer.copyAll": "复制全部文本",
   "compactSummaryRenderer.preview": "已保留 {{count}} 个字符",
   "compactSummaryRenderer.title": "已压缩的上下文",
   "contentArray.cacheCreation": "缓存创建:",

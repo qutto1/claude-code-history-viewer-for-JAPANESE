@@ -7,6 +7,7 @@ import { layout } from "@/components/renderers";
 import { useCaptureExpandState } from "@/contexts/CaptureExpandContext";
 import { HighlightedText } from "../common/HighlightedText";
 import { Markdown } from "../common/Markdown";
+import { useCopyButton } from "@/hooks/useCopyButton";
 import { formatTimeShort } from "@/utils/time";
 
 type Props = {
@@ -33,6 +34,7 @@ export const CompactSummaryRenderer = memo(function CompactSummaryRenderer({
   currentMatchIndex = 0,
 }: Props) {
   const { t } = useTranslation();
+  const { renderCopyButton } = useCopyButton();
   const [isExpanded, setIsExpanded] = useCaptureExpandState("compact-summary", false);
 
   // Auto-expand when the active search matches inside, so the highlight is
@@ -52,42 +54,64 @@ export const CompactSummaryRenderer = memo(function CompactSummaryRenderer({
         layout.rounded
       )}
     >
-      <button
-        type="button"
-        onClick={() => setIsExpanded((prev) => !prev)}
-        aria-expanded={isExpanded}
+      <div
         className={cn(
-          "w-full flex items-center text-left",
+          "w-full flex items-center",
           layout.headerPadding,
           layout.headerHeight,
-          layout.iconGap,
-          "hover:bg-tool-system/20 transition-colors"
+          layout.iconGap
         )}
       >
-        <ChevronRight
+        <button
+          type="button"
+          onClick={() => setIsExpanded((prev) => !prev)}
+          aria-expanded={isExpanded}
           className={cn(
-            layout.iconSize,
-            "shrink-0 transition-transform duration-200 text-tool-system",
-            isExpanded && "rotate-90"
+            "flex items-center text-left flex-1 min-w-[10ch]",
+            layout.iconGap,
+            "hover:bg-tool-system/20 transition-colors rounded-sm -m-1 p-1",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           )}
-        />
-        <Minimize2 className={cn(layout.iconSize, "text-tool-system shrink-0")} />
-        <span className={cn(layout.titleText, "text-tool-system whitespace-nowrap shrink-0")}>
-          {t("compactSummaryRenderer.title", "Compacted context")}
-        </span>
-        {!isExpanded && (
-          <span className={cn(layout.smallText, "text-muted-foreground truncate")}>
-            {t("compactSummaryRenderer.preview", "{{count}} characters carried over", {
-              count: content.length,
-            })}
+        >
+          <ChevronRight
+            className={cn(
+              layout.iconSize,
+              "shrink-0 transition-transform duration-200 text-tool-system",
+              isExpanded && "rotate-90"
+            )}
+          />
+          <Minimize2 className={cn(layout.iconSize, "text-tool-system shrink-0")} />
+          <span className={cn(layout.titleText, "text-tool-system whitespace-nowrap shrink-0")}>
+            {t("compactSummaryRenderer.title", "Compacted context")}
           </span>
-        )}
-        {timestamp && (
-          <span className={cn(layout.smallText, "ml-auto shrink-0 text-tool-system")}>
-            {formatTimeShort(timestamp)}
-          </span>
-        )}
-      </button>
+          {!isExpanded && (
+            <span className={cn(layout.smallText, "text-muted-foreground truncate")}>
+              {t("compactSummaryRenderer.preview", "{{count}} characters carried over", {
+                count: content.length,
+              })}
+            </span>
+          )}
+          {timestamp && (
+            <span className={cn(layout.smallText, "ml-auto shrink-0 text-tool-system")}>
+              {formatTimeShort(timestamp)}
+            </span>
+          )}
+        </button>
+        {/* Sibling of the toggle rather than nested inside it — a button cannot
+            contain a button. Copies the raw Markdown source, so it works while
+            the card is still collapsed. */}
+        <div
+          className={cn("flex items-center shrink-0 ml-auto", layout.iconGap, layout.smallText)}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {renderCopyButton(
+            content,
+            "compact-summary",
+            t("compactSummaryRenderer.copyAll", "Copy all text"),
+            true
+          )}
+        </div>
+      </div>
 
       {isExpanded && (
         <div className={layout.contentPadding}>

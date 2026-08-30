@@ -119,6 +119,7 @@
   "commandRenderer.status": "ステータス:",
   "commandRenderer.systemNote": "システムノート",
   "commandRenderer.unknownContentType": "不明なコンテンツタイプ",
+  "compactSummaryRenderer.copyAll": "全文をコピー",
   "compactSummaryRenderer.preview": "{{count}} 文字を引き継ぎ",
   "compactSummaryRenderer.title": "圧縮されたコンテキスト",
   "contentArray.cacheCreation": "キャッシュ作成:",

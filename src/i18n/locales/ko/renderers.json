@@ -119,6 +119,7 @@
   "commandRenderer.status": "상태:",
   "commandRenderer.systemNote": "시스템 메모",
   "commandRenderer.unknownContentType": "알 수 없는 콘텐츠 타입",
+  "compactSummaryRenderer.copyAll": "전체 텍스트 복사",
   "compactSummaryRenderer.preview": "{{count}}자 인계됨",
   "compactSummaryRenderer.title": "압축된 컨텍스트",
   "contentArray.cacheCreation": "캐시 생성:",

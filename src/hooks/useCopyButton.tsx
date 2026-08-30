@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { RefreshCw, Check, X, Clipboard } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { TooltipButton } from "../shared/TooltipButton";
 
 interface CopyState {
@@ -26,6 +27,7 @@ export const useCopyButton = () => {
       }, 2000);
     } catch (error) {
       console.error("클립보드 복사 실패:", error);
+      toast.error(t("copyButton.error", "Copy failed"));
       setCopyStates((prev) => ({ ...prev, [id]: "error" }));
 
       // 2초 후 상태 초기화
@@ -53,7 +55,7 @@ export const useCopyButton = () => {
           aria-label={label}
           onClick={() => copyToClipboard(text, id)}
           disabled={state === "copying"}
-          className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
+          className={`w-6 h-6 flex items-center justify-center rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
             state === "success"
               ? "text-success"
               : state === "error"
@@ -82,7 +84,7 @@ export const useCopyButton = () => {
         aria-label={label}
         onClick={() => copyToClipboard(text, id)}
         disabled={state === "copying"}
-        className={`h-6 flex items-center gap-1 px-2 text-xs rounded transition-colors ${
+        className={`h-6 flex items-center gap-1 px-2 text-xs rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
           state === "success"
             ? "bg-success/20 text-success"
             : state === "error"
