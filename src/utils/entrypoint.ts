@@ -1,6 +1,8 @@
 /**
  * Claude Code stamps every JSONL record with a top-level `entrypoint` field
- * identifying the originating client: "cli" / "claude-vscode" / "claude-desktop".
+ * identifying the originating client: "cli" / "sdk-cli" / "claude-vscode" /
+ * "claude-desktop". "sdk-cli" marks headless Agent SDK runs — scheduled or
+ * scripted batches with nobody at the keyboard.
  * The kimi provider derives equivalent values at scan time from the kimi-code
  * session state ("kimi-code-cli" terminal / "kimi-code-vscode" VS Code
  * extension), and the copilot provider uses "copilot-cli" / "copilot-vscode" /
@@ -13,7 +15,7 @@
 import type { SessionEntrypointFilter } from "@/types/metadata.types";
 
 /** Normalized session source categories (the non-"all" filter values). */
-export type EntrypointCategory = "cli" | "vscode" | "desktop";
+export type EntrypointCategory = "cli" | "sdk" | "vscode" | "desktop";
 
 /**
  * Map a raw JSONL `entrypoint` value to a normalized category.
@@ -28,6 +30,8 @@ export function normalizeEntrypoint(
     case "copilot-cli":
     case "kimi-code-cli":
       return "cli";
+    case "sdk-cli":
+      return "sdk";
     case "claude-vscode":
     case "copilot-vscode":
     case "kimi-code-vscode":
@@ -67,6 +71,10 @@ export const ENTRYPOINT_BADGE_META: Record<
     i18nKey: "session.item.entrypoint.cli",
     badgeClass: "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400",
   },
+  sdk: {
+    i18nKey: "session.item.entrypoint.sdk",
+    badgeClass: "text-amber-600 bg-amber-500/10 dark:text-amber-400",
+  },
   vscode: {
     i18nKey: "session.item.entrypoint.vscode",
     badgeClass: "text-blue-600 bg-blue-500/10 dark:text-blue-400",
@@ -84,6 +92,7 @@ export const ENTRYPOINT_FILTER_LABEL_KEYS: Record<
 > = {
   all: "session.filter.source.all",
   cli: "session.filter.source.cli",
+  sdk: "session.filter.source.sdk",
   vscode: "session.filter.source.vscode",
   desktop: "session.filter.source.desktop",
 };
@@ -92,6 +101,7 @@ export const ENTRYPOINT_FILTER_LABEL_KEYS: Record<
 export const ENTRYPOINT_FILTER_OPTIONS: SessionEntrypointFilter[] = [
   "all",
   "cli",
+  "sdk",
   "vscode",
   "desktop",
 ];

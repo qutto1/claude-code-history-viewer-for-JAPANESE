@@ -179,7 +179,15 @@ export function isSessionMetadataEmpty(metadata: SessionMetadata): boolean {
 }
 
 export function isProjectMetadataEmpty(metadata: ProjectMetadata): boolean {
-  return !metadata.hidden && !metadata.alias && !metadata.parentProject;
+  return (
+    !metadata.hidden &&
+    !metadata.alias &&
+    !metadata.parentProject &&
+    !metadata.environmentLabel &&
+    // An explicit `routine: false` overrides the automatic classification, so
+    // it is content even though it is falsy.
+    metadata.routine === undefined
+  );
 }
 
 export function hasUserMetadata(metadata: UserMetadata | null): metadata is UserMetadata {

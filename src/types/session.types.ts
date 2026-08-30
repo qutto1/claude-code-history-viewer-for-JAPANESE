@@ -49,6 +49,12 @@ export interface ClaudeProject {
   path_status?: ProjectPathStatus;
   /** Git worktree 정보 */
   git_info?: GitInfo;
+  /**
+   * Execution environment the project is predominantly run from: the raw
+   * `entrypoint` shared by most of its newest sessions ("sdk-cli" for headless
+   * Agent SDK batches, "claude-desktop" for interactive work, …).
+   */
+  entrypoint?: string;
 }
 
 export interface ClaudeSession {
@@ -64,7 +70,11 @@ export interface ClaudeSession {
   has_errors: boolean;
   summary?: string;
   relevance?: number;
-  /** Originating Claude Code client (raw JSONL `entrypoint` value). */
+  /**
+   * Originating Claude Code client (raw JSONL `entrypoint` value):
+   * "cli" / "sdk-cli" (headless Agent SDK runs) / "claude-vscode" /
+   * "claude-desktop".
+   */
   entrypoint?: string;
 }
 

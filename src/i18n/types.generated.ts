@@ -5,8 +5,8 @@
  * 직접 수정하지 마세요.
  *
  * 생성 명령: pnpm run generate:i18n-types
- * 생성 시간: 2026-08-30T15:00:33.188Z
- * 총 키 개수: 1942
+ * 생성 시간: 2026-08-30T15:20:00.304Z
+ * 총 키 개수: 1944
  * Namespace 수: 11
  */
 
@@ -419,7 +419,7 @@ export type AnalyticsKeys =
   | 'analytics.weeklyActivity';
 
 /**
- * session namespace의 번역 키 (257개)
+ * session namespace의 번역 키 (259개)
  * 파일: locales/{lang}/session.json
  */
 export type SessionKeys =
@@ -556,6 +556,7 @@ export type SessionKeys =
   | 'session.filter.source.cli'
   | 'session.filter.source.desktop'
   | 'session.filter.source.label'
+  | 'session.filter.source.sdk'
   | 'session.filter.source.vscode'
   | 'session.id'
   | 'session.interaction.assistantMessage'
@@ -593,6 +594,7 @@ export type SessionKeys =
   | 'session.item.containsToolUse'
   | 'session.item.entrypoint.cli'
   | 'session.item.entrypoint.desktop'
+  | 'session.item.entrypoint.sdk'
   | 'session.item.entrypoint.vscode'
   | 'session.item.lastModified'
   | 'session.item.messageCount'
@@ -3100,6 +3102,7 @@ export type TranslationKey =
   | 'session.filter.source.cli'
   | 'session.filter.source.desktop'
   | 'session.filter.source.label'
+  | 'session.filter.source.sdk'
   | 'session.filter.source.vscode'
   | 'session.id'
   | 'session.interaction.assistantMessage'
@@ -3137,6 +3140,7 @@ export type TranslationKey =
   | 'session.item.containsToolUse'
   | 'session.item.entrypoint.cli'
   | 'session.item.entrypoint.desktop'
+  | 'session.item.entrypoint.sdk'
   | 'session.item.entrypoint.vscode'
   | 'session.item.lastModified'
   | 'session.item.messageCount'

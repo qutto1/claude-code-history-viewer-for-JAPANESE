@@ -180,6 +180,7 @@ fn merge_projects(parts: Vec<(SourceKind, ClaudeProject)>) -> Vec<ClaudeProject>
                 provider: Some(PROVIDER_ID.to_string()),
                 storage_type: None,
                 custom_directory_label: template.custom_directory_label,
+                entrypoint: template.entrypoint,
             }
         })
         .collect();
@@ -386,6 +387,7 @@ mod tests {
             provider: Some("copilot".to_string()),
             storage_type: None,
             custom_directory_label: None,
+            entrypoint: None,
         }
     }
 

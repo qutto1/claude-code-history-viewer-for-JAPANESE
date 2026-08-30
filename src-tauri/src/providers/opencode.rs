@@ -309,6 +309,7 @@ pub fn scan_projects_from_path(base_path: &str) -> Result<Vec<ClaudeProject>, St
                 provider: Some("opencode".to_string()),
                 storage_type: Some("json".to_string()),
                 custom_directory_label: None,
+                entrypoint: None,
             });
         }
     }
@@ -891,6 +892,7 @@ fn scan_projects_from_db(base_path: &str) -> Option<Vec<ClaudeProject>> {
             provider: Some("opencode".to_string()),
             storage_type: Some("sqlite".to_string()),
             custom_directory_label: None,
+            entrypoint: None,
         });
     }
 
@@ -955,6 +957,7 @@ fn scan_global_directory_projects(
                 provider: Some("opencode".to_string()),
                 storage_type: Some("sqlite".to_string()),
                 custom_directory_label: None,
+                entrypoint: None,
             }
         })
         .collect()

@@ -100,6 +100,7 @@ pub fn scan_projects_from_path(base_path: &str) -> Result<Vec<ClaudeProject>, St
                 provider: Some(PROVIDER_ID.to_string()),
                 storage_type: Some("jsonl".to_string()),
                 custom_directory_label: None,
+                entrypoint: None,
             }
         })
         .collect();

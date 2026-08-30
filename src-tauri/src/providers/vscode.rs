@@ -412,6 +412,7 @@ fn scan_workspace(
         provider: Some(PROVIDER_ID.to_string()),
         storage_type: None,
         custom_directory_label: custom_directory_label.map(ToString::to_string),
+        entrypoint: None,
     }))
 }
 

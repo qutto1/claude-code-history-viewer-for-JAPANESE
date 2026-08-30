@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   ENTRYPOINT_BADGE_META,
+  ENTRYPOINT_FILTER_LABEL_KEYS,
+  ENTRYPOINT_FILTER_OPTIONS,
   matchesEntrypointFilter,
   normalizeEntrypoint,
 } from "@/utils/entrypoint";
@@ -11,6 +13,10 @@ describe("normalizeEntrypoint", () => {
     expect(normalizeEntrypoint("cli")).toBe("cli");
     expect(normalizeEntrypoint("claude-vscode")).toBe("vscode");
     expect(normalizeEntrypoint("claude-desktop")).toBe("desktop");
+  });
+
+  it("keeps headless Agent SDK runs out of the cli category", () => {
+    expect(normalizeEntrypoint("sdk-cli")).toBe("sdk");
   });
 
   it("maps copilot entrypoint values", () => {
@@ -32,10 +38,17 @@ describe("normalizeEntrypoint", () => {
   });
 
   it("provides badge metadata for every category", () => {
-    for (const category of ["cli", "vscode", "desktop"] as const) {
+    for (const category of ["cli", "sdk", "vscode", "desktop"] as const) {
       const meta = ENTRYPOINT_BADGE_META[category];
       expect(meta.i18nKey).toBeTruthy();
       expect(meta.badgeClass).toBeTruthy();
+    }
+  });
+
+  it("offers a filter option and label for every category", () => {
+    expect(ENTRYPOINT_FILTER_OPTIONS).toContain("sdk");
+    for (const option of ENTRYPOINT_FILTER_OPTIONS) {
+      expect(ENTRYPOINT_FILTER_LABEL_KEYS[option]).toBeTruthy();
     }
   });
 });
@@ -54,5 +67,12 @@ describe("matchesEntrypointFilter", () => {
 
   it("excludes sessions without an entrypoint from category filters", () => {
     expect(matchesEntrypointFilter(null, "cli")).toBe(false);
+  });
+
+  it("separates headless SDK runs from interactive CLI sessions", () => {
+    expect(matchesEntrypointFilter("sdk-cli", "sdk")).toBe(true);
+    expect(matchesEntrypointFilter("sdk-cli", "cli")).toBe(false);
+    expect(matchesEntrypointFilter("cli", "sdk")).toBe(false);
+    expect(matchesEntrypointFilter("sdk-cli", "all")).toBe(true);
   });
 });

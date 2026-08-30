@@ -350,6 +350,7 @@ mod project_snapshots {
             provider: None,
             storage_type: None,
             custom_directory_label: None,
+            entrypoint: None,
         };
 
         // The two path fields are redacted because their spelling is
@@ -377,6 +378,7 @@ mod project_snapshots {
             provider: Some("forgecode".to_string()),
             storage_type: Some("sqlite".to_string()),
             custom_directory_label: None,
+            entrypoint: None,
         };
 
         assert_json_snapshot!("forgecode_project", project);
@@ -397,6 +399,7 @@ mod project_snapshots {
             provider: Some("pi".to_string()),
             storage_type: None,
             custom_directory_label: None,
+            entrypoint: None,
         };
 
         // Redacted for the same reason as `claude_project` above.

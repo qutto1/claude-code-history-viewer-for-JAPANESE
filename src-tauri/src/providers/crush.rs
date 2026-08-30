@@ -93,6 +93,7 @@ fn scan_db(db_path: &Path) -> Option<ClaudeProject> {
         provider: Some(PROVIDER.to_string()),
         storage_type: Some("sqlite".to_string()),
         custom_directory_label: None,
+        entrypoint: None,
     })
 }
 

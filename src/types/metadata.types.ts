@@ -37,6 +37,16 @@ export interface ProjectMetadata {
   alias?: string;
   /** Parent project path for worktree grouping */
   parentProject?: string;
+  /**
+   * Hand-written execution environment label (e.g. "desktop PC", "cloud VM").
+   * The logs carry no hostname, so this can only come from the user.
+   */
+  environmentLabel?: string;
+  /**
+   * Manual override for "this project is automated/routine work", which is
+   * otherwise derived from the project's dominant entrypoint.
+   */
+  routine?: boolean;
 }
 
 /** Grouping mode for project tree display */
@@ -49,7 +59,12 @@ export type SessionSortOrder = "newest" | "oldest";
  * Session source filter — narrows the session list by the originating
  * Claude Code client (the JSONL `entrypoint` field). "all" disables the filter.
  */
-export type SessionEntrypointFilter = "all" | "cli" | "vscode" | "desktop";
+export type SessionEntrypointFilter =
+  | "all"
+  | "cli"
+  | "sdk"
+  | "vscode"
+  | "desktop";
 
 /** Global user settings */
 export interface UserSettings {
@@ -96,7 +111,15 @@ export const isSessionMetadataEmpty = (metadata: SessionMetadata): boolean => {
 
 /** Helper to check if project metadata is empty */
 export const isProjectMetadataEmpty = (metadata: ProjectMetadata): boolean => {
-  return !metadata.hidden && !metadata.alias && !metadata.parentProject;
+  return (
+    !metadata.hidden &&
+    !metadata.alias &&
+    !metadata.parentProject &&
+    !metadata.environmentLabel &&
+    // An explicit `routine: false` overrides the automatic classification, so
+    // it is content even though it is falsy.
+    metadata.routine === undefined
+  );
 };
 
 /** Helper to get session display name (custom name or fallback) */

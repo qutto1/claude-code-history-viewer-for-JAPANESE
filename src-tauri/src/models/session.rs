@@ -58,6 +58,12 @@ pub struct ClaudeProject {
     /// Label for custom Claude directory source (e.g., "Personal")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_directory_label: Option<String>,
+    /// Execution environment the project is predominantly run from: the raw
+    /// `entrypoint` value shared by most of its newest sessions (e.g. "sdk-cli"
+    /// for headless Agent SDK batches, "claude-desktop" for interactive work).
+    /// `None` when no session file records one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entrypoint: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -78,6 +84,8 @@ struct ClaudeProjectPayload<'a> {
     storage_type: &'a Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     custom_directory_label: &'a Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    entrypoint: &'a Option<String>,
 }
 
 impl Serialize for ClaudeProject {
@@ -97,6 +105,7 @@ impl Serialize for ClaudeProject {
             provider: &self.provider,
             storage_type: &self.storage_type,
             custom_directory_label: &self.custom_directory_label,
+            entrypoint: &self.entrypoint,
         }
         .serialize(serializer)
     }
@@ -133,7 +142,8 @@ pub struct ClaudeSession {
     /// Storage type (json, sqlite)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_type: Option<String>,
-    /// Originating client for Claude Code sessions: "cli" / "claude-vscode" / "claude-desktop".
+    /// Originating client for Claude Code sessions: "cli" / "sdk-cli" (headless
+    /// Agent SDK runs) / "claude-vscode" / "claude-desktop".
     /// `None` for non-Claude providers or sessions predating the entrypoint field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entrypoint: Option<String>,
@@ -164,6 +174,7 @@ mod tests {
             provider: None,
             storage_type: None,
             custom_directory_label: None,
+            entrypoint: None,
         }
     }
 

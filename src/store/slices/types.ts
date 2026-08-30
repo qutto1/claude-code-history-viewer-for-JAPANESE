@@ -355,6 +355,18 @@ export interface AppStoreActions {
     fallbackSummary?: string
   ) => string | undefined;
   isProjectHidden: (projectPath: string) => boolean;
+  isProjectRoutine: (
+    projectPath: string,
+    entrypoint?: string | null
+  ) => boolean;
+  setProjectRoutine: (
+    projectPath: string,
+    routine: boolean | undefined
+  ) => Promise<void>;
+  setProjectEnvironmentLabel: (
+    projectPath: string,
+    label: string | undefined
+  ) => Promise<void>;
   hideProject: (projectPath: string) => Promise<void>;
   unhideProject: (projectPath: string) => Promise<void>;
   addCustomClaudePath: (path: string, label?: string) => Promise<void>;

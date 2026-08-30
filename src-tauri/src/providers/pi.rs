@@ -332,6 +332,7 @@ pub(crate) fn scan_projects_in(root: &Path, provider: &'static str) -> Vec<Claud
             provider: Some(provider.to_string()),
             storage_type: None,
             custom_directory_label: None,
+            entrypoint: None,
         });
     }
 

@@ -141,6 +141,7 @@ pub fn scan_projects_in(base: &Path) -> Result<Vec<ClaudeProject>, String> {
             provider: Some(PROVIDER_ID.to_string()),
             storage_type: Some("json".to_string()),
             custom_directory_label: None,
+            entrypoint: None,
         });
     }
 

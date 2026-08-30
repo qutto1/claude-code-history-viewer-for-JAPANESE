@@ -428,6 +428,7 @@ fn scan_projects_filtered(
                 provider: Some(client.provider_id().to_string()),
                 storage_type: None,
                 custom_directory_label: custom_directory_label.map(ToString::to_string),
+                entrypoint: None,
             }
         })
         .collect();

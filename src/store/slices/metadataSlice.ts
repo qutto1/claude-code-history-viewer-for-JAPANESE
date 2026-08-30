@@ -20,6 +20,7 @@ import {
   normalizeAutoRefreshInterval,
 } from "../../types";
 import { matchGlobPattern } from "../../utils/globUtils";
+import { normalizeEntrypoint } from "../../utils/entrypoint";
 import type { FullAppStore } from "./types";
 
 // ============================================================================
@@ -65,6 +66,25 @@ export interface MetadataSliceActions {
   ) => string | undefined;
   /** Check if a project should be hidden */
   isProjectHidden: (projectPath: string) => boolean;
+  /**
+   * Whether a project counts as automated/routine work: the manual override
+   * when the user set one, otherwise the classification derived from the
+   * project's dominant entrypoint.
+   */
+  isProjectRoutine: (
+    projectPath: string,
+    entrypoint?: string | null
+  ) => boolean;
+  /** Set (or clear, with `undefined`) a project's routine override */
+  setProjectRoutine: (
+    projectPath: string,
+    routine: boolean | undefined
+  ) => Promise<void>;
+  /** Set (or clear, with an empty label) a project's environment label */
+  setProjectEnvironmentLabel: (
+    projectPath: string,
+    label: string | undefined
+  ) => Promise<void>;
   /** Hide a specific project */
   hideProject: (projectPath: string) => Promise<void>;
   /** Unhide a specific project */
@@ -241,6 +261,36 @@ export const createMetadataSlice: StateCreator<
     }
 
     return false;
+  },
+
+  isProjectRoutine: (projectPath: string, entrypoint?: string | null) => {
+    const { userMetadata } = get();
+
+    // A hand-set answer always wins, including an explicit "no": the user is
+    // the only source of truth about a second machine or a cloud environment.
+    const override = userMetadata.projects[projectPath]?.routine;
+    if (override !== undefined) {
+      return override;
+    }
+
+    return normalizeEntrypoint(entrypoint) === "sdk";
+  },
+
+  setProjectRoutine: async (
+    projectPath: string,
+    routine: boolean | undefined
+  ) => {
+    await get().updateProjectMetadata(projectPath, { routine });
+  },
+
+  setProjectEnvironmentLabel: async (
+    projectPath: string,
+    label: string | undefined
+  ) => {
+    const trimmed = label?.trim();
+    await get().updateProjectMetadata(projectPath, {
+      environmentLabel: trimmed ? trimmed : undefined,
+    });
   },
 
   hideProject: async (projectPath: string) => {

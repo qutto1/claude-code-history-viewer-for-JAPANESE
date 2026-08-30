@@ -185,12 +185,27 @@ pub struct ProjectMetadata {
     /// Parent project path for worktree grouping
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_project: Option<String>,
+
+    /// Hand-written execution environment label (e.g. "desktop PC", "cloud VM").
+    /// The logs carry no hostname, so the machine a project belongs to can only
+    /// come from the user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_label: Option<String>,
+
+    /// Manual override for "this project is automated/routine work", which is
+    /// otherwise derived from the project's dominant entrypoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routine: Option<bool>,
 }
 
 impl ProjectMetadata {
     /// Check if metadata has any values set
     pub fn is_empty(&self) -> bool {
-        self.hidden.is_none() && self.alias.is_none() && self.parent_project.is_none()
+        self.hidden.is_none()
+            && self.alias.is_none()
+            && self.parent_project.is_none()
+            && self.environment_label.is_none()
+            && self.routine.is_none()
     }
 }
 
@@ -335,6 +350,46 @@ mod tests {
             ..Default::default()
         };
         assert!(!with_name.is_empty());
+    }
+
+    #[test]
+    fn test_project_metadata_is_empty() {
+        assert!(ProjectMetadata::default().is_empty());
+
+        let labelled = ProjectMetadata {
+            environment_label: Some("cloud VM".to_string()),
+            ..Default::default()
+        };
+        assert!(!labelled.is_empty());
+
+        let routine = ProjectMetadata {
+            routine: Some(false),
+            ..Default::default()
+        };
+        assert!(!routine.is_empty());
+    }
+
+    #[test]
+    fn test_project_environment_override_roundtrip() {
+        let mut metadata = UserMetadata::new();
+        let project = metadata.get_project_mut("my-project");
+        project.environment_label = Some("desktop PC".to_string());
+        project.routine = Some(false);
+
+        let json = serde_json::to_string(&metadata).unwrap();
+        assert!(json.contains("environmentLabel"));
+
+        let deserialized: UserMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(metadata, deserialized);
+
+        // Metadata written before this field existed still loads.
+        let legacy: UserMetadata = serde_json::from_str(
+            r#"{"sessions":{},"projects":{"p":{"hidden":true}},"settings":{}}"#,
+        )
+        .unwrap();
+        let legacy_project = legacy.get_project("p").unwrap();
+        assert_eq!(legacy_project.environment_label, None);
+        assert_eq!(legacy_project.routine, None);
     }
 
     #[test]

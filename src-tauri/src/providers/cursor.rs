@@ -217,6 +217,7 @@ fn scan_projects_from_global(base: &Path) -> Result<Vec<ClaudeProject>, String> 
             provider: Some("cursor".to_string()),
             storage_type: Some("sqlite".to_string()),
             custom_directory_label: None,
+            entrypoint: None,
         });
     }
 
@@ -280,6 +281,7 @@ fn scan_workspace(ws_path: &Path) -> Option<ClaudeProject> {
         provider: Some("cursor".to_string()),
         storage_type: Some("sqlite".to_string()),
         custom_directory_label: None,
+        entrypoint: None,
     })
 }
 

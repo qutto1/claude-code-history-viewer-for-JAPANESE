@@ -64,6 +64,13 @@ export interface ClaudeProject {
   storage_type?: "json" | "jsonl" | "sqlite";
   /** Label for custom Claude directory source (e.g., "Personal") */
   custom_directory_label?: string;
+  /**
+   * Execution environment the project is predominantly run from: the raw
+   * `entrypoint` shared by most of its newest sessions ("sdk-cli" for headless
+   * Agent SDK batches, "claude-desktop" for interactive work, …).
+   * Undefined when no session file records one.
+   */
+  entrypoint?: string;
 }
 
 export interface ClaudeSession {
@@ -88,7 +95,8 @@ export interface ClaudeSession {
   /**
    * Originating client/surface for the session. Raw value from the JSONL
    * `entrypoint` field. Known values:
-   *   * Claude:  "cli" / "claude-vscode" / "claude-desktop"
+   *   * Claude:  "cli" / "sdk-cli" (headless Agent SDK runs) /
+   *              "claude-vscode" / "claude-desktop"
    *   * Copilot: "copilot-cli" / "copilot-desktop" / "copilot-vscode"
    * Undefined for providers that don't stamp the field, or older sessions.
    */

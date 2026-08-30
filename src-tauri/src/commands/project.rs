@@ -225,7 +225,7 @@ fn scan_projects_blocking(claude_path: String) -> Vec<ClaudeProject> {
         let mut session_count = 0;
         let mut message_count = 0;
         let mut last_modified = None;
-        let mut direct_cwd_candidate: Option<(SystemTime, String)> = None;
+        let mut direct_sessions: Vec<(SystemTime, PathBuf)> = Vec::new();
         let mut nested_cwd_candidate: Option<(SystemTime, String)> = None;
 
         for jsonl_entry in WalkDir::new(entry.path())
@@ -259,19 +259,26 @@ fn scan_projects_blocking(claude_path: String) -> Vec<ClaudeProject> {
                 let estimated_messages = estimate_message_count_from_size(metadata.len());
                 message_count += estimated_messages;
 
-                let cwd_candidate = if is_direct_session {
-                    &mut direct_cwd_candidate
-                } else {
-                    &mut nested_cwd_candidate
-                };
-                let should_check_cwd = match (&cwd_candidate, modified) {
+                // Top-level session files are not read here: both the project's
+                // cwd and its entrypoint come from the newest of them, and which
+                // ones those are is only known once the walk has finished.
+                if is_direct_session {
+                    direct_sessions.push((
+                        modified.unwrap_or(SystemTime::UNIX_EPOCH),
+                        jsonl_entry.path().to_path_buf(),
+                    ));
+                    continue;
+                }
+
+                let should_check_cwd = match (&nested_cwd_candidate, modified) {
                     (None, _) => true,
                     (Some((current_modified, _)), Some(modified)) => modified > *current_modified,
                     (Some(_), None) => false,
                 };
                 if should_check_cwd {
-                    if let Some(cwd) = extract_cwd_from_session_file(jsonl_entry.path()) {
-                        *cwd_candidate = Some((modified.unwrap_or(SystemTime::UNIX_EPOCH), cwd));
+                    if let Some(cwd) = extract_session_facts(jsonl_entry.path()).cwd {
+                        nested_cwd_candidate =
+                            Some((modified.unwrap_or(SystemTime::UNIX_EPOCH), cwd));
                     }
                 }
             }
@@ -310,12 +317,13 @@ fn scan_projects_blocking(claude_path: String) -> Vec<ClaudeProject> {
         //    `/home/cym/paseo`) while the parent project remains `/home/cym`,
         //    so nested files are only a secondary fallback here.
         // 3. A lossy heuristic decode of the folder name, as a last resort.
+        let DirectSessionScan {
+            cwd: direct_cwd,
+            entrypoint,
+        } = harvest_newest_sessions(&mut direct_sessions);
+
         let actual_path = crate::utils::decode_project_path_verified(&project_path)
-            .or_else(|| {
-                direct_cwd_candidate
-                    .or(nested_cwd_candidate)
-                    .map(|(_, cwd)| cwd)
-            })
+            .or_else(|| direct_cwd.or_else(|| nested_cwd_candidate.map(|(_, cwd)| cwd)))
             .unwrap_or_else(|| crate::utils::decode_project_path(&project_path));
         let project_name = project_display_name_from_path(&actual_path)
             .unwrap_or_else(|| extract_project_name(&raw_project_name));
@@ -334,6 +342,7 @@ fn scan_projects_blocking(claude_path: String) -> Vec<ClaudeProject> {
             provider: None,
             storage_type: None,
             custom_directory_label: None,
+            entrypoint,
         });
     }
 
@@ -352,13 +361,32 @@ fn scan_projects_blocking(claude_path: String) -> Vec<ClaudeProject> {
     projects
 }
 
-fn extract_cwd_from_session_file(file_path: &Path) -> Option<String> {
+/// What one session file says about the project it belongs to.
+#[derive(Debug, Default, PartialEq)]
+struct SessionFacts {
+    /// Working directory the session ran in.
+    cwd: Option<String>,
+    /// Raw `entrypoint` value, i.e. the client the session was started from.
+    entrypoint: Option<String>,
+}
+
+/// Read a session file's project-level facts.
+///
+/// Both facts sit on the same top-level records, so they are harvested in one
+/// pass over the first 100 non-empty lines and the read stops as soon as both
+/// have been seen — normally on the very first line, which is why adding the
+/// entrypoint here costs no extra I/O.
+fn extract_session_facts(file_path: &Path) -> SessionFacts {
     #[derive(serde::Deserialize)]
-    struct CwdEntry {
+    struct FactsEntry {
         cwd: Option<String>,
+        entrypoint: Option<String>,
     }
 
-    let file = fs::File::open(file_path).ok()?;
+    let mut facts = SessionFacts::default();
+    let Ok(file) = fs::File::open(file_path) else {
+        return facts;
+    };
     let reader = BufReader::new(file);
     let mut checked_non_empty = 0;
 
@@ -372,19 +400,113 @@ fn extract_cwd_from_session_file(file_path: &Path) -> Option<String> {
         }
         checked_non_empty += 1;
 
-        let Ok(entry) = serde_json::from_str::<CwdEntry>(line) else {
+        let Ok(entry) = serde_json::from_str::<FactsEntry>(line) else {
             continue;
         };
-        let Some(cwd) = entry.cwd else {
-            continue;
-        };
-        let cwd = cwd.trim().to_string();
-        if !cwd.is_empty() {
-            return Some(cwd);
+        if facts.cwd.is_none() {
+            facts.cwd = trimmed_non_empty(entry.cwd);
+        }
+        if facts.entrypoint.is_none() {
+            facts.entrypoint = trimmed_non_empty(entry.entrypoint);
+        }
+        if facts.cwd.is_some() && facts.entrypoint.is_some() {
+            break;
         }
     }
 
-    None
+    facts
+}
+
+/// A JSONL string field, with blank treated as absent.
+fn trimmed_non_empty(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// How many of a project's newest session files are read to decide which
+/// execution environment the project belongs to.
+///
+/// One file is not enough. A history of 2,992 `sdk-cli` batch sessions here also
+/// held 18 `claude-desktop` ones, two of them consecutive: for that stretch the
+/// newest file on its own would have relabelled an automated project as
+/// interactive desktop work. A majority over a short window of the newest files
+/// rides that out, while tallying every file would cost ~2,900 opens on that one
+/// project alone.
+const ENTRYPOINT_SAMPLE_SIZE: usize = 16;
+
+/// What a project's newest top-level session files say about it.
+#[derive(Debug, Default, PartialEq)]
+struct DirectSessionScan {
+    /// Working directory of the newest session that records one.
+    cwd: Option<String>,
+    /// Entrypoint the sampled sessions mostly agree on.
+    entrypoint: Option<String>,
+}
+
+/// Read a project's newest top-level session files, newest first.
+///
+/// `sessions` is `(modified, path)` and is sorted in place. Only
+/// [`ENTRYPOINT_SAMPLE_SIZE`] files feed the entrypoint vote; the scan continues
+/// past that point solely while it is still short of a `cwd`.
+fn harvest_newest_sessions(sessions: &mut [(SystemTime, PathBuf)]) -> DirectSessionScan {
+    sessions.sort_unstable_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+
+    let mut cwd = None;
+    let mut entrypoints: Vec<String> = Vec::new();
+
+    for (index, (_, path)) in sessions.iter().enumerate() {
+        let sampling = index < ENTRYPOINT_SAMPLE_SIZE;
+        if !sampling && cwd.is_some() {
+            break;
+        }
+
+        let facts = extract_session_facts(path);
+        if sampling {
+            if let Some(entrypoint) = facts.entrypoint {
+                entrypoints.push(entrypoint);
+            }
+        }
+        if cwd.is_none() {
+            cwd = facts.cwd;
+        }
+    }
+
+    DirectSessionScan {
+        cwd,
+        entrypoint: majority_entrypoint(&entrypoints),
+    }
+}
+
+/// The entrypoint most of `samples` agree on.
+///
+/// `samples` arrives newest first and ties go to whichever value was seen first,
+/// so an even split resolves to the most recent session rather than to iteration
+/// order.
+fn majority_entrypoint(samples: &[String]) -> Option<String> {
+    let mut tally: Vec<(&str, usize)> = Vec::new();
+    for sample in samples {
+        match tally
+            .iter_mut()
+            .find(|(value, _)| *value == sample.as_str())
+        {
+            Some((_, count)) => *count += 1,
+            None => tally.push((sample.as_str(), 1)),
+        }
+    }
+
+    let mut winner: Option<(&str, usize)> = None;
+    for (value, count) in tally {
+        let is_better = match winner {
+            Some((_, best_count)) => count > best_count,
+            None => true,
+        };
+        if is_better {
+            winner = Some((value, count));
+        }
+    }
+
+    winner.map(|(value, _)| value.to_string())
 }
 
 fn project_display_name_from_path(path: &str) -> Option<String> {
@@ -703,7 +825,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_cwd_from_session_file_ignores_empty_lines_before_limit() {
+    fn test_extract_session_facts_ignores_empty_lines_before_limit() {
         let temp_dir = TempDir::new().unwrap();
         let mut lines = vec![String::new(); 150];
         lines.push(
@@ -721,9 +843,208 @@ mod tests {
 
         let file_path = temp_dir.path().join("session.jsonl");
         assert_eq!(
-            extract_cwd_from_session_file(&file_path),
+            extract_session_facts(&file_path).cwd,
             Some("/tmp/cchv-empty-line-test".to_string())
         );
+    }
+
+    #[test]
+    fn test_extract_session_facts_reads_cwd_and_entrypoint_together() {
+        let temp_dir = TempDir::new().unwrap();
+        create_test_jsonl_file(
+            &temp_dir.path().to_path_buf(),
+            "session.jsonl",
+            &jsonl_lines(vec![
+                // A leading record that carries neither fact must not stop the scan.
+                serde_json::json!({"type": "summary", "summary": "Batch run"}),
+                serde_json::json!({
+                    "type": "user",
+                    "cwd": "/tmp/cchv-facts",
+                    "entrypoint": "sdk-cli",
+                }),
+            ]),
+        );
+
+        let facts = extract_session_facts(&temp_dir.path().join("session.jsonl"));
+        assert_eq!(
+            facts,
+            SessionFacts {
+                cwd: Some("/tmp/cchv-facts".to_string()),
+                entrypoint: Some("sdk-cli".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_extract_session_facts_treats_blank_entrypoint_as_absent() {
+        let temp_dir = TempDir::new().unwrap();
+        create_test_jsonl_file(
+            &temp_dir.path().to_path_buf(),
+            "session.jsonl",
+            &jsonl_lines(vec![serde_json::json!({
+                "type": "user",
+                "cwd": "/tmp/cchv-blank",
+                "entrypoint": "   ",
+            })]),
+        );
+
+        let facts = extract_session_facts(&temp_dir.path().join("session.jsonl"));
+        assert_eq!(facts.cwd, Some("/tmp/cchv-blank".to_string()));
+        assert_eq!(facts.entrypoint, None);
+    }
+
+    #[test]
+    fn test_majority_entrypoint_ignores_a_recent_minority() {
+        let samples: Vec<String> = ["claude-desktop", "claude-desktop"]
+            .into_iter()
+            .chain(std::iter::repeat_n("sdk-cli", 14))
+            .map(ToString::to_string)
+            .collect();
+
+        assert_eq!(
+            majority_entrypoint(&samples),
+            Some("sdk-cli".to_string()),
+            "two interactive sessions must not relabel an automated project"
+        );
+    }
+
+    #[test]
+    fn test_majority_entrypoint_breaks_ties_towards_the_newest() {
+        let samples: Vec<String> = ["cli", "claude-desktop"]
+            .into_iter()
+            .map(ToString::to_string)
+            .collect();
+
+        assert_eq!(majority_entrypoint(&samples), Some("cli".to_string()));
+        assert_eq!(majority_entrypoint(&[]), None);
+    }
+
+    #[test]
+    fn test_harvest_newest_sessions_samples_the_newest_files_only() {
+        let temp_dir = TempDir::new().unwrap();
+        let dir = temp_dir.path().to_path_buf();
+
+        // One old interactive session, then a wall of newer automated ones. Only
+        // the newest ENTRYPOINT_SAMPLE_SIZE files may reach the vote.
+        create_test_jsonl_file(
+            &dir,
+            "old.jsonl",
+            &jsonl_lines(vec![serde_json::json!({
+                "type": "user",
+                "cwd": "/tmp/cchv-old",
+                "entrypoint": "claude-desktop",
+            })]),
+        );
+        let mut sessions = vec![(SystemTime::UNIX_EPOCH, dir.join("old.jsonl"))];
+        for index in 0..ENTRYPOINT_SAMPLE_SIZE {
+            let name = format!("batch-{index}.jsonl");
+            create_test_jsonl_file(
+                &dir,
+                &name,
+                &jsonl_lines(vec![serde_json::json!({
+                    "type": "user",
+                    "cwd": "/tmp/cchv-batch",
+                    "entrypoint": "sdk-cli",
+                })]),
+            );
+            sessions.push((
+                SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(index as u64 + 1),
+                dir.join(name),
+            ));
+        }
+
+        let scan = harvest_newest_sessions(&mut sessions);
+
+        assert_eq!(scan.entrypoint, Some("sdk-cli".to_string()));
+        // cwd comes from the newest file, not from whichever was walked first.
+        assert_eq!(scan.cwd, Some("/tmp/cchv-batch".to_string()));
+    }
+
+    #[test]
+    fn test_harvest_newest_sessions_without_sessions_or_facts() {
+        assert_eq!(
+            harvest_newest_sessions(&mut []),
+            DirectSessionScan::default()
+        );
+
+        let temp_dir = TempDir::new().unwrap();
+        create_test_jsonl_file(&temp_dir.path().to_path_buf(), "empty.jsonl", "");
+        let mut sessions = vec![(SystemTime::UNIX_EPOCH, temp_dir.path().join("empty.jsonl"))];
+
+        assert_eq!(
+            harvest_newest_sessions(&mut sessions),
+            DirectSessionScan::default()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_scan_projects_reports_the_dominant_entrypoint() {
+        let temp_dir = TempDir::new().unwrap();
+        let claude_dir = temp_dir.path().join(".claude");
+        let project_dir = claude_dir.join("projects").join("batch-project");
+        fs::create_dir_all(&project_dir).unwrap();
+
+        create_test_jsonl_file(
+            &project_dir,
+            "batch-a.jsonl",
+            &jsonl_lines(vec![serde_json::json!({
+                "uuid": "uuid-1",
+                "sessionId": "session-1",
+                "type": "user",
+                "entrypoint": "sdk-cli",
+                "message": {"role": "user", "content": "run"},
+            })]),
+        );
+        create_test_jsonl_file(
+            &project_dir,
+            "batch-b.jsonl",
+            &jsonl_lines(vec![serde_json::json!({
+                "uuid": "uuid-2",
+                "sessionId": "session-2",
+                "type": "user",
+                "entrypoint": "sdk-cli",
+                "message": {"role": "user", "content": "run"},
+            })]),
+        );
+
+        let projects = scan_projects(claude_dir.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].entrypoint, Some("sdk-cli".to_string()));
+
+        let serialized = serde_json::to_value(&projects[0]).unwrap();
+        assert_eq!(
+            serialized.get("entrypoint"),
+            Some(&serde_json::json!("sdk-cli")),
+            "the field has to survive the hand-written Serialize impl"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_scan_projects_leaves_entrypoint_unset_when_unrecorded() {
+        let temp_dir = TempDir::new().unwrap();
+        let claude_dir = temp_dir.path().join(".claude");
+        let project_dir = claude_dir.join("projects").join("legacy-project");
+        fs::create_dir_all(&project_dir).unwrap();
+
+        create_test_jsonl_file(
+            &project_dir,
+            "session.jsonl",
+            r#"{"uuid":"uuid-1","sessionId":"session-1","type":"user","message":{"role":"user","content":"Hello"}}"#,
+        );
+
+        let projects = scan_projects(claude_dir.to_string_lossy().to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].entrypoint, None);
+        assert!(serde_json::to_value(&projects[0])
+            .unwrap()
+            .get("entrypoint")
+            .is_none());
     }
 
     #[tokio::test]

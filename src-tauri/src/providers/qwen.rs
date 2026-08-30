@@ -155,6 +155,7 @@ pub fn scan_projects() -> Result<Vec<ClaudeProject>, String> {
                 provider: Some(PROVIDER.to_string()),
                 storage_type: None,
                 custom_directory_label: None,
+                entrypoint: None,
             }
         })
         .collect();

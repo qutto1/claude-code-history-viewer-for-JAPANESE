@@ -219,6 +219,7 @@ pub(crate) fn scan_in_for(f: &Family, base: &Path) -> Result<Vec<ClaudeProject>,
                 provider: Some(f.provider_id.to_string()),
                 storage_type: Some("json".to_string()),
                 custom_directory_label: None,
+                entrypoint: None,
             }
         })
         .collect();

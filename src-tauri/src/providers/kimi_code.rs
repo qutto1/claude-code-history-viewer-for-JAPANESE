@@ -215,6 +215,7 @@ pub(crate) fn scan_projects_from_root(sessions_root: &Path) -> Vec<ClaudeProject
             provider: Some(PROVIDER_ID.to_string()),
             storage_type: Some("jsonl".to_string()),
             custom_directory_label: None,
+            entrypoint: None,
         });
     }
 

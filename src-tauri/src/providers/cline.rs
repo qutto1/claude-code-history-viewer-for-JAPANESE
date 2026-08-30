@@ -101,6 +101,7 @@ fn scan_base_path(base_path: &Path, label: &str) -> Vec<ClaudeProject> {
             provider: Some("cline".to_string()),
             storage_type: Some("json".to_string()),
             custom_directory_label: Some(label.to_string()),
+            entrypoint: None,
         });
     }
     projects

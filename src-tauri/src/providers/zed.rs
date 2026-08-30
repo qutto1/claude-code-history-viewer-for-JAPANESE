@@ -181,6 +181,7 @@ fn scan_projects_conn(conn: &Connection) -> Result<Vec<ClaudeProject>, String> {
                 provider: Some(PROVIDER.to_string()),
                 storage_type: Some("sqlite".to_string()),
                 custom_directory_label: None,
+                entrypoint: None,
             }
         })
         .collect();
