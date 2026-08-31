@@ -269,7 +269,10 @@ describe('Tauri Configuration Tests', () => {
   describe('Bundle Configuration Validation', () => {
     it('should have bundle configuration enabled', () => {
       expect(config.bundle.active).toBe(true);
-      expect(config.bundle.targets).toBe('all');
+      // Only nsis, not "all": the msi (WiX) target requires a numeric-only
+      // prerelease identifier, which this fork's "-fork.N" version scheme
+      // is not, and every local install has only ever used the nsis setup.exe.
+      expect(config.bundle.targets).toEqual(['nsis']);
       // No updater means no updater artifacts, and this fork holds none of the
       // signing secrets producing them would require.
       expect(config.bundle.createUpdaterArtifacts).toBe(false);

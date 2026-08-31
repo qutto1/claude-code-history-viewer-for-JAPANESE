@@ -5,12 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Entries from **1.27.0** onward describe the `qutto1/claude-code-history-viewer` fork.
+Entries from **1.26.3-fork.1** onward describe the `qutto1/claude-code-history-viewer` fork.
 Everything from 1.26.3 down is upstream `jhlee0409/claude-code-history-viewer` and is
 left exactly as upstream wrote it; a version number appearing here does not imply an
 upstream release of the same number.
 
-## [1.27.0] - 2026-08-30
+## [1.26.3-fork.1] - 2026-08-30
 
 Fork release: a much denser transcript, the `/compact` carried-over context made readable, and the project list filtered by where the work actually ran.
 

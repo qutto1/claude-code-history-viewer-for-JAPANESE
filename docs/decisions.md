@@ -12,7 +12,7 @@
 | 選択肢 | 内容 | 採否 |
 |---|---|---|
 | GitHub リポジトリ名のみ | `gh repo rename` のみ。ファイル変更ゼロ、旧 URL は GitHub の恒久リダイレクトで生存、インストール済みアプリに影響なし | **採用** |
-| アプリの表示名も変更 | `tauri.conf.json` の `productName` も変更。`%LOCALAPPDATA%` の別フォルダへ移動し「プログラムの追加と削除」に二重登録、既存 1.27.0 の手動アンインストールが必要 | 不採用 |
+| アプリの表示名も変更 | `tauri.conf.json` の `productName` も変更。`%LOCALAPPDATA%` の別フォルダへ移動し「プログラムの追加と削除」に二重登録、既存 1.26.3-fork.1 の手動アンインストールが必要 | 不採用 |
 
 **帰結**: `qutto1/claude-code-history-viewer` → `qutto1/claude-code-history-viewer-for-JAPANESE`。ローカルの `origin` も更新済み。`productName` / `identifier` / Cargo の `name` はいずれも据え置き。
 
