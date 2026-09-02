@@ -13,6 +13,7 @@ export interface MessageFilterContentTypes {
     toolCalls: boolean;
     commands: boolean;
     parallelTasks: boolean;
+    compactSummary: boolean;
 }
 
 export interface MessageFilter {
@@ -30,6 +31,7 @@ const defaultMessageFilter = (): MessageFilter => ({
         toolCalls: true,
         commands: true,
         parallelTasks: true,
+        compactSummary: true,
     },
 });
 
@@ -83,6 +85,9 @@ const loadPersistedMessageFilter = (): MessageFilter => {
                 parallelTasks: isBool(contentTypes.parallelTasks)
                     ? contentTypes.parallelTasks
                     : fallback.contentTypes.parallelTasks,
+                compactSummary: isBool(contentTypes.compactSummary)
+                    ? contentTypes.compactSummary
+                    : fallback.contentTypes.compactSummary,
             },
         };
     } catch {
@@ -204,6 +209,6 @@ export const createFilterSlice: StateCreator<
         return !roles.user || !roles.assistant
             || !contentTypes.text || !contentTypes.thinking
             || !contentTypes.toolCalls || !contentTypes.commands
-            || !contentTypes.parallelTasks;
+            || !contentTypes.parallelTasks || !contentTypes.compactSummary;
     },
 });

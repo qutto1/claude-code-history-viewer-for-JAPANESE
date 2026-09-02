@@ -100,6 +100,7 @@
   "filter.content.toolCalls": "工具呼叫",
   "filter.content.commands": "指令",
   "filter.content.parallelTasks": "並行任務",
+  "filter.content.compactSummary": "壓縮上下文",
   "filter.reset": "重設篩選",
   "filter.active": "篩選已啟用",
   "filter.showing": "{{filtered}} / {{total}}"

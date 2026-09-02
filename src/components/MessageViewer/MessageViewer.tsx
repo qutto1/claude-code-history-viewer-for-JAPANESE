@@ -171,6 +171,10 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
     () => getMessageUuidsByCategory(messages, "parallel-task").size > 0,
     [messages],
   );
+  const hasCompactSummary = useMemo(
+    () => messages.some((msg) => msg.type === "user" && msg.isCompactSummary),
+    [messages],
+  );
 
   // Apply role + content type filters
   const displayMessages = useMemo(
@@ -1025,6 +1029,7 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
           totalCount={messages.length}
           filteredCount={displayMessages.length}
           hasParallelTasks={hasParallelTasks}
+          hasCompactSummary={hasCompactSummary}
         />
       )}
 

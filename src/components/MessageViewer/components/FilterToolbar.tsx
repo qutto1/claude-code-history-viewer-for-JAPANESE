@@ -1,4 +1,4 @@
-import { Filter, RotateCcw, User, Bot, MessageSquareText, Brain, Wrench, Terminal, Zap } from "lucide-react";
+import { Filter, RotateCcw, User, Bot, MessageSquareText, Brain, Wrench, Terminal, Zap, Archive } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "../../../store/useAppStore";
@@ -34,9 +34,10 @@ interface FilterToolbarProps {
   totalCount: number;
   filteredCount: number;
   hasParallelTasks: boolean;
+  hasCompactSummary: boolean;
 }
 
-export function FilterToolbar({ totalCount, filteredCount, hasParallelTasks }: FilterToolbarProps) {
+export function FilterToolbar({ totalCount, filteredCount, hasParallelTasks, hasCompactSummary }: FilterToolbarProps) {
   const { t } = useTranslation();
   const {
     messageFilter,
@@ -117,6 +118,14 @@ export function FilterToolbar({ totalCount, filteredCount, hasParallelTasks }: F
             onClick={() => toggleContentType("parallelTasks")}
             label={t("filter.content.parallelTasks")}
             icon={<Zap className="w-3 h-3" />}
+          />
+        )}
+        {hasCompactSummary && (
+          <FilterToggle
+            active={messageFilter.contentTypes.compactSummary}
+            onClick={() => toggleContentType("compactSummary")}
+            label={t("filter.content.compactSummary")}
+            icon={<Archive className="w-3 h-3" />}
           />
         )}
       </div>

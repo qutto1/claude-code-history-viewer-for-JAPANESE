@@ -69,6 +69,29 @@ describe("filterSlice message-filter persistence", () => {
     expect(makeStore().getState().messageFilter.contentTypes.parallelTasks).toBe(true);
   });
 
+  it("enables the compacted-context filter when loading filters saved by an older version", () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      roles: { user: true, assistant: true },
+      contentTypes: {
+        text: true,
+        thinking: true,
+        toolCalls: true,
+        commands: true,
+        parallelTasks: true,
+      },
+    }));
+
+    expect(makeStore().getState().messageFilter.contentTypes.compactSummary).toBe(true);
+  });
+
+  it("persists a compactSummary toggle", () => {
+    const store = makeStore();
+    store.getState().toggleContentType("compactSummary");
+    expect(store.getState().messageFilter.contentTypes.compactSummary).toBe(false);
+    expect(readSaved().contentTypes.compactSummary).toBe(false);
+    expect(store.getState().isMessageFilterActive()).toBe(true);
+  });
+
   it("resetMessageFilter restores defaults and persists them", () => {
     const store = makeStore();
     store.getState().toggleRole("user");
@@ -88,6 +111,7 @@ describe("filterSlice message-filter persistence", () => {
         toolCalls: true,
         commands: true,
         parallelTasks: true,
+        compactSummary: true,
       },
     });
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ roles: { user: "nope" } }));

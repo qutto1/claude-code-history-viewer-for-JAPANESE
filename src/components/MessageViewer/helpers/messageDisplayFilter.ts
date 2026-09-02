@@ -23,9 +23,17 @@ export function applyMessageDisplayFilter(
     "parallel-task",
     contentTypes.parallelTasks,
   );
-  if (allRoles && allContent) return parallelTaskFilteredMessages;
+  // The /compact carried-over context is a whole synthetic user row, not a
+  // content-array block, so it can't go through the assistant sub-block
+  // check below and needs the same category-style pre-filter as parallel tasks.
+  const compactSummaryFilteredMessages = contentTypes.compactSummary
+    ? parallelTaskFilteredMessages
+    : parallelTaskFilteredMessages.filter(
+      (msg) => !(msg.type === "user" && msg.isCompactSummary),
+    );
+  if (allRoles && allContent) return compactSummaryFilteredMessages;
 
-  return parallelTaskFilteredMessages.filter((msg) => {
+  return compactSummaryFilteredMessages.filter((msg) => {
     // Role filter
     if (msg.type === "user") return roles.user;
     if (msg.type === "assistant") {

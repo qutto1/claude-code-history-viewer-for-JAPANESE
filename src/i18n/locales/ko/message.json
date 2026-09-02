@@ -100,6 +100,7 @@
   "filter.content.toolCalls": "도구 호출",
   "filter.content.commands": "명령어",
   "filter.content.parallelTasks": "병렬 작업",
+  "filter.content.compactSummary": "압축 컨텍스트",
   "filter.reset": "필터 초기화",
   "filter.active": "필터 활성",
   "filter.showing": "{{filtered}} / {{total}}"

@@ -13,6 +13,7 @@ const { toggleContentTypeMock, useAppStoreMock } = vi.hoisted(() => {
         toolCalls: true,
         commands: true,
         parallelTasks: true,
+        compactSummary: true,
       },
     },
     toggleRole: vi.fn(),
@@ -40,7 +41,7 @@ vi.mock("react-i18next", () => ({
 describe("FilterToolbar", () => {
   it("only shows the Parallel Tasks filter for sessions containing that category", () => {
     const { rerender } = render(
-      <FilterToolbar totalCount={2} filteredCount={2} hasParallelTasks={false} />,
+      <FilterToolbar totalCount={2} filteredCount={2} hasParallelTasks={false} hasCompactSummary={false} />,
     );
 
     expect(screen.queryByRole("button", {
@@ -48,12 +49,31 @@ describe("FilterToolbar", () => {
     })).not.toBeInTheDocument();
 
     rerender(
-      <FilterToolbar totalCount={2} filteredCount={2} hasParallelTasks />,
+      <FilterToolbar totalCount={2} filteredCount={2} hasParallelTasks hasCompactSummary={false} />,
     );
     const toggle = screen.getByRole("button", {
       name: "filter.content.parallelTasks",
     });
     fireEvent.click(toggle);
     expect(toggleContentTypeMock).toHaveBeenCalledWith("parallelTasks");
+  });
+
+  it("only shows the Compacted Context filter for sessions containing a /compact summary", () => {
+    const { rerender } = render(
+      <FilterToolbar totalCount={2} filteredCount={2} hasParallelTasks={false} hasCompactSummary={false} />,
+    );
+
+    expect(screen.queryByRole("button", {
+      name: "filter.content.compactSummary",
+    })).not.toBeInTheDocument();
+
+    rerender(
+      <FilterToolbar totalCount={2} filteredCount={2} hasParallelTasks={false} hasCompactSummary />,
+    );
+    const toggle = screen.getByRole("button", {
+      name: "filter.content.compactSummary",
+    });
+    fireEvent.click(toggle);
+    expect(toggleContentTypeMock).toHaveBeenCalledWith("compactSummary");
   });
 });
