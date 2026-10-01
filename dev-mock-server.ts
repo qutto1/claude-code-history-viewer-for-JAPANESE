@@ -55,7 +55,17 @@ function makeMessage(
         : content,
     model: type === "assistant" ? mockModel(index) : undefined,
     usage: type === "assistant" ? mockUsage(index) : undefined,
+    // Top-level, like the real JSONL — not nested under `message`.
+    effort: type === "assistant" ? mockEffort(index) : undefined,
   };
+}
+
+/** Cycles through the known reasoning-effort levels so the gutter's
+ * model-or-effort-changed emphasis has something to react to even on runs
+ * where the model itself stays constant. */
+function mockEffort(index: number): string {
+  const levels = ["medium", "high", "high", "xhigh", "medium"];
+  return levels[index % levels.length];
 }
 
 /**

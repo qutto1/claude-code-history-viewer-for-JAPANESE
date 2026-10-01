@@ -5,8 +5,8 @@
  * 직접 수정하지 마세요.
  *
  * 생성 명령: pnpm run generate:i18n-types
- * 생성 시간: 2026-09-02T07:59:23.361Z
- * 총 키 개수: 1958
+ * 생성 시간: 2026-10-01T16:00:53.877Z
+ * 총 키 개수: 1964
  * Namespace 수: 11
  */
 
@@ -1467,7 +1467,7 @@ export type MessageKeys =
   | 'navigator.userOnly';
 
 /**
- * renderers namespace의 번역 키 (399개)
+ * renderers namespace의 번역 키 (405개)
  * 파일: locales/{lang}/renderers.json
  */
 export type RenderersKeys =
@@ -1505,6 +1505,12 @@ export type RenderersKeys =
   | 'assistantMessageDetails.cost'
   | 'assistantMessageDetails.costEstimated'
   | 'assistantMessageDetails.duration'
+  | 'assistantMessageDetails.effort'
+  | 'assistantMessageDetails.effortHigh'
+  | 'assistantMessageDetails.effortLow'
+  | 'assistantMessageDetails.effortMax'
+  | 'assistantMessageDetails.effortMedium'
+  | 'assistantMessageDetails.effortXhigh'
   | 'assistantMessageDetails.estimated'
   | 'assistantMessageDetails.input'
   | 'assistantMessageDetails.model'
@@ -2284,6 +2290,12 @@ export type TranslationKey =
   | 'assistantMessageDetails.cost'
   | 'assistantMessageDetails.costEstimated'
   | 'assistantMessageDetails.duration'
+  | 'assistantMessageDetails.effort'
+  | 'assistantMessageDetails.effortHigh'
+  | 'assistantMessageDetails.effortLow'
+  | 'assistantMessageDetails.effortMax'
+  | 'assistantMessageDetails.effortMedium'
+  | 'assistantMessageDetails.effortXhigh'
   | 'assistantMessageDetails.estimated'
   | 'assistantMessageDetails.input'
   | 'assistantMessageDetails.model'

@@ -4907,6 +4907,7 @@ impl TryFrom<RawLogEntry> for ClaudeMessage {
             microcompact_metadata: log_entry.microcompact_metadata,
             is_compact_summary: log_entry.is_compact_summary,
             provider: None,
+            effort: log_entry.effort,
         })
     }
 }
@@ -5481,6 +5482,7 @@ mod tests {
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: provider.map(std::string::ToString::to_string),
+            effort: None,
         }
     }
 
@@ -5575,6 +5577,7 @@ mod tests {
             is_compact_summary: None,
             content: None,
             is_meta: None,
+            effort: None,
         };
 
         let result = ClaudeMessage::try_from(raw);
@@ -5639,6 +5642,7 @@ mod tests {
             is_compact_summary: None,
             content: None,
             is_meta: None,
+            effort: None,
         };
 
         let result = ClaudeMessage::try_from(raw);
@@ -5693,6 +5697,7 @@ mod tests {
             is_compact_summary: None,
             content: None,
             is_meta: None,
+            effort: None,
         };
 
         let result = ClaudeMessage::try_from(raw);
@@ -5744,6 +5749,7 @@ mod tests {
             is_compact_summary: None,
             content: None,
             is_meta: None,
+            effort: None,
         };
 
         let result = ClaudeMessage::try_from(raw);
@@ -5795,6 +5801,7 @@ mod tests {
             is_compact_summary: None,
             content: None,
             is_meta: None,
+            effort: None,
         };
 
         // Should succeed with timestamp even without session_id
@@ -5850,6 +5857,7 @@ mod tests {
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: None,
+            effort: None,
         };
 
         let usage = extract_token_usage(&msg);
@@ -5902,6 +5910,7 @@ mod tests {
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: None,
+            effort: None,
         };
 
         let usage = extract_token_usage(&msg);
@@ -5952,6 +5961,7 @@ mod tests {
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: None,
+            effort: None,
         };
 
         let usage = extract_token_usage(&msg);
@@ -5998,6 +6008,7 @@ mod tests {
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: None,
+            effort: None,
         };
 
         let usage = extract_token_usage(&msg);
@@ -6042,6 +6053,7 @@ mod tests {
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: None,
+            effort: None,
         };
 
         let usage = extract_token_usage(&msg);
@@ -7899,6 +7911,7 @@ mod tests {
             is_compact_summary: None,
             content: None,
             is_meta: None,
+            effort: None,
         };
         ClaudeMessage::try_from(raw).expect("test message construction")
     }

@@ -1308,6 +1308,7 @@ mod tests {
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: Some("claude".to_string()),
+            effort: None,
         }
     }
 

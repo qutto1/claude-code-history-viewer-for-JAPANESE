@@ -390,6 +390,7 @@ pub(crate) fn parse_rollout_file(canonical_path: &Path) -> Result<Vec<ClaudeMess
     let mut session_id = session_id_from_rollout_filename(canonical_path).unwrap_or_default();
     let mut meta_seen = false;
     let mut current_model: Option<String> = None;
+    let mut current_effort: Option<String> = None;
     let mut prev_input_tokens: u32 = 0;
     let mut prev_output_tokens: u32 = 0;
     let mut prev_cached_tokens: u32 = 0;
@@ -428,17 +429,23 @@ pub(crate) fn parse_rollout_file(canonical_path: &Path) -> Result<Vec<ClaudeMess
                     if let Some(m) = payload.get("model").and_then(|v| v.as_str()) {
                         current_model = Some(m.to_string());
                     }
+                    if let Some(e) = payload.get("effort").and_then(|v| v.as_str()) {
+                        current_effort = Some(e.to_string());
+                    }
                 }
             }
             "response_item" => {
                 if let Some(payload) = val.get("payload") {
-                    if let Some(msg) = convert_codex_item(
+                    if let Some(mut msg) = convert_codex_item(
                         payload,
                         &session_id,
                         current_model.as_ref(),
                         &line_timestamp,
                         &mut msg_counter,
                     ) {
+                        if msg.message_type == "assistant" {
+                            msg.effort.clone_from(&current_effort);
+                        }
                         if try_merge_tool_result_into_previous(&mut messages, &msg) {
                             continue;
                         }
@@ -508,9 +515,12 @@ pub(crate) fn parse_rollout_file(canonical_path: &Path) -> Result<Vec<ClaudeMess
                                 });
                             }
                         }
-                    } else if let Some(msg) =
+                    } else if let Some(mut msg) =
                         convert_codex_event(payload, &session_id, &line_timestamp, &mut msg_counter)
                     {
+                        if msg.message_type == "assistant" {
+                            msg.effort.clone_from(&current_effort);
+                        }
                         messages.push(msg);
                     }
                 }
@@ -2705,6 +2715,91 @@ mod tests {
             .iter()
             .all(|m| m.provider.as_deref() == Some("codex")));
         assert!(messages.iter().all(|m| m.session_id == "sess-1"));
+    }
+
+    #[test]
+    #[serial]
+    fn turn_context_effort_is_attached_to_assistant_messages_only() {
+        let tmp = TempDir::new().expect("temp dir should be created");
+        let codex_home = tmp.path().join("codex-home");
+        let sessions_dir = codex_home.join("sessions");
+        fs::create_dir_all(&sessions_dir).expect("sessions dir should be created");
+        let _guard = EnvVarGuard::set("CODEX_HOME", &codex_home);
+        let rollout_path = sessions_dir.join("rollout-2026-09-03.jsonl");
+
+        let lines = [
+            json!({
+                "timestamp": "2026-09-03T10:00:00Z",
+                "type": "session_meta",
+                "payload": { "id": "sess-effort" }
+            }),
+            json!({
+                "timestamp": "2026-09-03T10:00:01Z",
+                "type": "turn_context",
+                "payload": { "model": "gpt-5.4", "effort": "medium" }
+            }),
+            json!({
+                "timestamp": "2026-09-03T10:00:02Z",
+                "type": "response_item",
+                "payload": {
+                    "id": "item-u1",
+                    "type": "message",
+                    "role": "user",
+                    "content": [{ "type": "input_text", "text": "hi" }]
+                }
+            }),
+            json!({
+                "timestamp": "2026-09-03T10:00:03Z",
+                "type": "response_item",
+                "payload": {
+                    "id": "item-a1",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{ "type": "output_text", "text": "first reply" }]
+                }
+            }),
+            json!({
+                "timestamp": "2026-09-03T10:00:04Z",
+                "type": "turn_context",
+                "payload": { "model": "gpt-5.4", "effort": "high" }
+            }),
+            json!({
+                "timestamp": "2026-09-03T10:00:05Z",
+                "type": "response_item",
+                "payload": {
+                    "id": "item-a2",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{ "type": "output_text", "text": "second reply" }]
+                }
+            }),
+        ];
+
+        let content = lines
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(&rollout_path, format!("{content}\n")).expect("fixture should be written");
+
+        let messages = load_messages(
+            rollout_path
+                .to_str()
+                .expect("rollout path should be valid UTF-8"),
+        )
+        .expect("rollout should be parsed");
+
+        assert_eq!(messages.len(), 3);
+        // A user turn carries no reasoning effort — only assistant turns do.
+        assert_eq!(messages[0].message_type, "user");
+        assert_eq!(messages[0].effort, None);
+        // Each assistant turn picks up whichever turn_context was active
+        // when it was produced, so a later turn's effort does not get
+        // applied retroactively to an earlier message.
+        assert_eq!(messages[1].message_type, "assistant");
+        assert_eq!(messages[1].effort.as_deref(), Some("medium"));
+        assert_eq!(messages[2].message_type, "assistant");
+        assert_eq!(messages[2].effort.as_deref(), Some("high"));
     }
 
     #[test]

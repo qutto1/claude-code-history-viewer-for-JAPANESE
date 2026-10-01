@@ -254,6 +254,7 @@ fn search_in_file(file_path: &PathBuf, matcher: &AhoCorasick) -> Vec<ClaudeMessa
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: None,
+            effort: log_entry.effort,
         };
         results.push(claude_message);
     }

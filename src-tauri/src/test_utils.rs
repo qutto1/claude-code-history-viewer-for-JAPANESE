@@ -79,6 +79,7 @@ pub struct MessageBuilder {
     content: Option<serde_json::Value>,
     role: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
     usage: Option<TokenUsage>,
 }
 
@@ -151,6 +152,11 @@ impl MessageBuilder {
         self
     }
 
+    pub fn with_effort(mut self, effort: &str) -> Self {
+        self.effort = Some(effort.to_string());
+        self
+    }
+
     pub fn with_usage(mut self, input: u32, output: u32) -> Self {
         self.usage = Some(TokenUsage {
             input_tokens: Some(input),
@@ -205,6 +211,7 @@ impl MessageBuilder {
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: None,
+            effort: self.effort,
         }
     }
 

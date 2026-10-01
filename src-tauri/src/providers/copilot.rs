@@ -426,6 +426,7 @@ mod tests {
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: Some(PROVIDER_ID.to_string()),
+            effort: None,
         }
     }
 

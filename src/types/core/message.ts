@@ -198,6 +198,13 @@ export interface ClaudeAssistantMessage extends BaseClaudeMessage {
    */
   messageId?: string;
   model?: string;
+  /**
+   * Reasoning effort this turn was generated at (e.g. "low" / "medium" /
+   * "high" / "xhigh" / "max"). Only Claude Code's own records and Codex's
+   * `turn_context.effort` currently populate this — absent for other
+   * providers.
+   */
+  effort?: string;
   stop_reason?: "tool_use" | "end_turn" | "max_tokens" | "stop_sequence" | "pause_turn" | "refusal";
   usage?: {
     input_tokens?: number;

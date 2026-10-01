@@ -7,7 +7,8 @@
  * message frames from touching.
  *
  * Only three things fit here, so everything else — the role label, the full
- * model id, the token breakdown — lives one hover away in a tooltip.
+ * model id, the reasoning effort, the token breakdown — lives one hover away
+ * in a tooltip.
  */
 
 import React, { useState, useCallback, useRef } from "react";
@@ -65,6 +66,18 @@ const formatLatency = (ms: number): string => {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s`;
+};
+
+/** Known reasoning-effort levels (Claude Code's own 5-step scale; Codex uses
+ * a 3-step subset of the same names). An effort string outside this set
+ * still renders — just untranslated — so a future provider value isn't
+ * silently dropped. */
+const EFFORT_LABEL_KEYS: Record<string, string> = {
+  low: "assistantMessageDetails.effortLow",
+  medium: "assistantMessageDetails.effortMedium",
+  high: "assistantMessageDetails.effortHigh",
+  xhigh: "assistantMessageDetails.effortXhigh",
+  max: "assistantMessageDetails.effortMax",
 };
 
 export const MessageGutter: React.FC<MessageGutterProps> = ({
@@ -157,7 +170,8 @@ export const MessageGutter: React.FC<MessageGutterProps> = ({
   // turns read at normal weight, and only the genuinely expensive ones go red.
   const isNegligibleCost =
     messageCost != null && messageCost.cost < NEGLIGIBLE_MESSAGE_COST_USD;
-  const hasDetails = assistant?.model != null && (usage != null || messageCost != null);
+  const hasDetails =
+    assistant?.model != null && (usage != null || messageCost != null || assistant?.effort != null);
 
   return (
     <div
@@ -239,6 +253,14 @@ export const MessageGutter: React.FC<MessageGutterProps> = ({
                 onEscapeKeyDown={closeDetails}
               >
                 <p className="mb-1"><strong>{t("assistantMessageDetails.model")}:</strong> {assistant?.model}</p>
+                {assistant?.effort ? (
+                  <p>
+                    {t("assistantMessageDetails.effort")}: {(() => {
+                      const labelKey = EFFORT_LABEL_KEYS[assistant.effort];
+                      return labelKey ? t(labelKey) : assistant.effort;
+                    })()}
+                  </p>
+                ) : null}
                 {usage?.input_tokens ? <p>{t("assistantMessageDetails.input")}: {usage.input_tokens.toLocaleString()}</p> : null}
                 {usage?.output_tokens ? <p>{t("assistantMessageDetails.output")}: {usage.output_tokens.toLocaleString()}</p> : null}
                 {messageCost?.cacheCreationTokens ? <p>{t("assistantMessageDetails.cacheCreation")}: {messageCost.cacheCreationTokens.toLocaleString()}</p> : null}

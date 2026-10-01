@@ -132,6 +132,11 @@ pub struct RawLogEntry {
     // Meta message flag (internal/command-related messages)
     #[serde(rename = "isMeta")]
     pub is_meta: Option<bool>,
+
+    /// Reasoning effort the assistant turn was generated at (e.g. "low" /
+    /// "medium" / "high" / "xhigh" / "max"). A top-level field on the raw
+    /// record, not nested under `message`.
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,6 +224,11 @@ pub struct ClaudeMessage {
     /// Provider identifier (claude, codex, opencode)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+    /// Reasoning effort the assistant turn was generated at (e.g. "low" /
+    /// "medium" / "high" / "xhigh" / "max"). Only Claude Code's own records
+    /// and Codex's `turn_context.effort` currently populate this.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -410,6 +420,40 @@ mod tests {
     }
 
     #[test]
+    fn test_raw_log_entry_parses_top_level_effort() {
+        // Claude Code writes "effort" as a sibling of "type"/"uuid", not
+        // nested under "message" — unlike "model", which lives inside it.
+        let json_str = r#"{
+            "uuid": "test-uuid",
+            "sessionId": "session-123",
+            "timestamp": "2025-06-26T12:00:00Z",
+            "type": "assistant",
+            "effort": "high",
+            "message": {
+                "role": "assistant",
+                "content": "done"
+            }
+        }"#;
+
+        let entry: RawLogEntry = serde_json::from_str(json_str).unwrap();
+        assert_eq!(entry.effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn test_raw_log_entry_without_effort_defaults_to_none() {
+        let json_str = r#"{
+            "uuid": "test-uuid",
+            "sessionId": "session-123",
+            "timestamp": "2025-06-26T12:00:00Z",
+            "type": "user",
+            "message": { "role": "user", "content": "hi" }
+        }"#;
+
+        let entry: RawLogEntry = serde_json::from_str(json_str).unwrap();
+        assert_eq!(entry.effort, None);
+    }
+
+    #[test]
     fn test_claude_message_serialization() {
         let message = ClaudeMessage {
             uuid: "msg-uuid-123".to_string(),
@@ -445,6 +489,7 @@ mod tests {
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: None,
+            effort: None,
         };
 
         let serialized = serde_json::to_string(&message).unwrap();
@@ -491,6 +536,7 @@ mod tests {
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: None,
+            effort: None,
         };
 
         let serialized = serde_json::to_string(&message).unwrap();

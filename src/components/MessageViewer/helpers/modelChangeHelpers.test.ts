@@ -3,13 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { ClaudeMessage } from "../../../types";
 import { collectModelChangeUuids } from "./modelChangeHelpers";
 
-const assistant = (uuid: string, model?: string): ClaudeMessage => ({
+const assistant = (uuid: string, model?: string, effort?: string): ClaudeMessage => ({
   uuid,
   type: "assistant",
   role: "assistant",
   timestamp: "2026-08-30T10:00:00.000Z",
   content: [{ type: "text", text: "ok" }],
   model,
+  effort,
 } as unknown as ClaudeMessage);
 
 const user = (uuid: string): ClaudeMessage => ({
@@ -86,5 +87,24 @@ describe("collectModelChangeUuids", () => {
     const messages = [assistant("a5", "claude-sonnet-5"), assistant("a6", "claude-sonnet-5")];
 
     expect(collectModelChangeUuids(messages)).toEqual(new Set(["a5"]));
+  });
+
+  it("marks a switch when only the reasoning effort changes, same model", () => {
+    const messages = [
+      assistant("a1", "gpt-5.4", "medium"),
+      assistant("a2", "gpt-5.4", "high"),
+      assistant("a3", "gpt-5.4", "high"),
+    ];
+
+    expect(collectModelChangeUuids(messages)).toEqual(new Set(["a1", "a2"]));
+  });
+
+  it("does not re-flag a run that keeps the same model and effort", () => {
+    const messages = [
+      assistant("a1", "claude-sonnet-5", "high"),
+      assistant("a2", "claude-sonnet-5", "high"),
+    ];
+
+    expect(collectModelChangeUuids(messages)).toEqual(new Set(["a1"]));
   });
 });

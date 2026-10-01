@@ -1671,6 +1671,7 @@ fn parse_line_to_message(
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: None,
+            effort: None,
         });
     }
 
@@ -1733,6 +1734,7 @@ fn parse_line_to_message(
         microcompact_metadata: log_entry.microcompact_metadata,
         is_compact_summary: log_entry.is_compact_summary,
         provider: None,
+        effort: log_entry.effort,
     })
 }
 
@@ -1803,6 +1805,7 @@ fn parse_line_simd(
             microcompact_metadata: None,
             is_compact_summary: None,
             provider: None,
+            effort: None,
         });
     }
 
@@ -1878,6 +1881,7 @@ fn parse_line_simd(
         microcompact_metadata: log_entry.microcompact_metadata,
         is_compact_summary: log_entry.is_compact_summary,
         provider: None,
+        effort: log_entry.effort,
     })
 }
 
@@ -2570,6 +2574,19 @@ mod tests {
         format!(r#"{{"type":"summary","summary":"{summary}","leafUuid":"leaf-123"}}"#)
     }
 
+    /// `effort` is a top-level field on the raw record (sibling of `uuid`/
+    /// `type`), not nested under `message` the way `model` is.
+    fn create_sample_assistant_message_with_effort(
+        uuid: &str,
+        session_id: &str,
+        content: &str,
+        effort: &str,
+    ) -> String {
+        format!(
+            r#"{{"uuid":"{uuid}","sessionId":"{session_id}","timestamp":"2025-06-26T10:01:00Z","type":"assistant","effort":"{effort}","message":{{"role":"assistant","content":[{{"type":"text","text":"{content}"}}],"id":"msg_123","model":"claude-opus-4-20250514"}}}}"#
+        )
+    }
+
     #[tokio::test]
     async fn test_load_session_messages_basic() {
         let temp_dir = TempDir::new().unwrap();
@@ -2589,6 +2606,28 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].message_type, "user");
         assert_eq!(messages[1].message_type, "assistant");
+    }
+
+    #[tokio::test]
+    async fn test_load_session_messages_includes_effort() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let content = format!(
+            "{}\n{}\n",
+            create_sample_user_message("uuid-1", "session-1", "Hello"),
+            create_sample_assistant_message_with_effort("uuid-2", "session-1", "Hi!", "high"),
+        );
+
+        let file_path = create_test_jsonl_file(&temp_dir, "test.jsonl", &content);
+
+        let result = load_session_messages(file_path.to_string_lossy().to_string()).await;
+
+        assert!(result.is_ok());
+        let messages = result.unwrap();
+        assert_eq!(messages.len(), 2);
+        // A user turn carries no reasoning effort.
+        assert_eq!(messages[0].effort, None);
+        assert_eq!(messages[1].effort.as_deref(), Some("high"));
     }
 
     #[tokio::test]
