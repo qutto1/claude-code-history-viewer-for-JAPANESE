@@ -335,7 +335,7 @@ describe('Tauri Configuration Tests', () => {
       it('should have valid minimum system version', () => {
         expect(config.bundle.macOS.minimumSystemVersion).toBe('10.13');
         expect(config.bundle.macOS.minimumSystemVersion).toMatch(/^\d+\.\d+$/);
-        
+
         // Ensure it's not too old or too new
         const [major, minor] = config.bundle.macOS.minimumSystemVersion.split('.').map(Number);
         expect(major).toBeGreaterThanOrEqual(10);
@@ -343,6 +343,33 @@ describe('Tauri Configuration Tests', () => {
         if (major === 10) {
           expect(minor).toBeGreaterThanOrEqual(13); // macOS High Sierra minimum
         }
+      });
+    });
+
+    describe('Windows Bundle Configuration', () => {
+      // Signs the NSIS installer with a self-signed certificate trusted only
+      // on this machine's own certificate store (Trusted Root + Trusted
+      // Publishers), so builds here no longer show "Unknown Publisher" in
+      // UAC. This does NOT extend trust to other machines that install the
+      // fork's GitHub Release without importing the same certificate.
+      it('should have Windows code-signing configuration', () => {
+        expect(config.bundle.windows).toBeDefined();
+        expect(typeof config.bundle.windows).toBe('object');
+      });
+
+      it('should sign with SHA-256 file digests', () => {
+        expect(config.bundle.windows.digestAlgorithm).toBe('sha256');
+      });
+
+      it('should reference a certificate by thumbprint, not by embedded key material', () => {
+        // A thumbprint is a public SHA-1 fingerprint used to look the
+        // certificate up in the OS certificate store; it is not a secret.
+        expect(config.bundle.windows.certificateThumbprint).toMatch(/^[0-9A-Fa-f]{40}$/);
+      });
+
+      it('should timestamp signatures so they remain valid after the certificate expires', () => {
+        expect(config.bundle.windows.timestampUrl).toBeTruthy();
+        expect(() => new URL(config.bundle.windows.timestampUrl)).not.toThrow();
       });
     });
   });
