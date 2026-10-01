@@ -10,6 +10,12 @@ Everything from 1.26.3 down is upstream `jhlee0409/claude-code-history-viewer` a
 left exactly as upstream wrote it; a version number appearing here does not imply an
 upstream release of the same number.
 
+## [1.26.3-fork.3] - 2026-09-03
+
+### Added
+- **The installer is now signed** — a self-signed Authenticode certificate is generated once, trusted in this machine's own certificate store (Trusted Root + Trusted Publishers), and its thumbprint is wired into `tauri.conf.json`'s `bundle.windows` config. `tauri build` now signs the main executable, every bundled NSIS plugin, and the setup exe itself automatically, which drops the "Unknown Publisher" warning when running the installer on this machine. The trust is local: another machine that downloads the release still sees the warning until it trusts the same certificate, or a certificate from a recognized CA is used instead.
+- **Reasoning effort ("Effort") alongside the model** — Claude Code writes `effort` as a top-level field on assistant records (e.g. `"high"`), and Codex carries the same concept in `turn_context.effort`; neither was ever parsed, so the value was silently dropped on every load path. It now rides through `RawLogEntry` → `ClaudeMessage` the same way `model` does, shows up in the gutter's token-usage tooltip, and — since a turn can switch effort while keeping the same model — the gutter's "did this turn change" emphasis now lights up on an effort change too, not only a model change.
+
 ## [1.26.3-fork.1] - 2026-08-30
 
 Fork release: a much denser transcript, the `/compact` carried-over context made readable, and the project list filtered by where the work actually ran.
