@@ -5,8 +5,8 @@
  * 직접 수정하지 마세요.
  *
  * 생성 명령: pnpm run generate:i18n-types
- * 생성 시간: 2026-11-12T05:32:24.164Z
- * 총 키 개수: 2029
+ * 생성 시간: 2026-11-12T05:35:41.584Z
+ * 총 키 개수: 2041
  * Namespace 수: 11
  */
 
@@ -1528,7 +1528,7 @@ export type MessageKeys =
   | 'navigator.userOnly';
 
 /**
- * renderers namespace의 번역 키 (408개)
+ * renderers namespace의 번역 키 (420개)
  * 파일: locales/{lang}/renderers.json
  */
 export type RenderersKeys =
@@ -1731,6 +1731,18 @@ export type RenderersKeys =
   | 'globalSearch.clearSearch'
   | 'globalSearch.close'
   | 'globalSearch.conversationId'
+  | 'globalSearch.dateFilter.all'
+  | 'globalSearch.dateFilter.custom'
+  | 'globalSearch.dateFilter.from'
+  | 'globalSearch.dateFilter.futureStart'
+  | 'globalSearch.dateFilter.invalidRange'
+  | 'globalSearch.dateFilter.label'
+  | 'globalSearch.dateFilter.last24h'
+  | 'globalSearch.dateFilter.last2d'
+  | 'globalSearch.dateFilter.last30d'
+  | 'globalSearch.dateFilter.last7d'
+  | 'globalSearch.dateFilter.last90d'
+  | 'globalSearch.dateFilter.to'
   | 'globalSearch.description'
   | 'globalSearch.filterType.all'
   | 'globalSearch.filterType.assistant'
@@ -2819,6 +2831,18 @@ export type TranslationKey =
   | 'globalSearch.clearSearch'
   | 'globalSearch.close'
   | 'globalSearch.conversationId'
+  | 'globalSearch.dateFilter.all'
+  | 'globalSearch.dateFilter.custom'
+  | 'globalSearch.dateFilter.from'
+  | 'globalSearch.dateFilter.futureStart'
+  | 'globalSearch.dateFilter.invalidRange'
+  | 'globalSearch.dateFilter.label'
+  | 'globalSearch.dateFilter.last24h'
+  | 'globalSearch.dateFilter.last2d'
+  | 'globalSearch.dateFilter.last30d'
+  | 'globalSearch.dateFilter.last7d'
+  | 'globalSearch.dateFilter.last90d'
+  | 'globalSearch.dateFilter.to'
   | 'globalSearch.description'
   | 'globalSearch.filterType.all'
   | 'globalSearch.filterType.assistant'

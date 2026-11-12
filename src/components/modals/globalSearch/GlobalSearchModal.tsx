@@ -13,12 +13,13 @@ import {
     Bot,
     MessageSquare,
     Lightbulb,
+    CalendarDays,
 } from "lucide-react";
 import { Dialog, DialogContent, Input } from "@/components/ui";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useAppStore } from "@/store/useAppStore";
-import type { ClaudeMessage, ClaudeProject, ClaudeSession, ContentItem } from "@/types";
+import type { ClaudeMessage, ClaudeProject, ClaudeSession } from "@/types";
 import {
     getProviderLabel,
     getWslSearchableProviderIds,
@@ -29,10 +30,46 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { getPathLeaf, getProjectDisplayName } from "@/utils/pathUtils";
 import { getLocale } from "@/utils/time";
+import {
+    buildDateRange,
+    DATE_FILTER_PRESETS,
+    DEFAULT_DATE_FILTER,
+    isDateFilterPreset,
+    normalizeDateFilter,
+    type DateFilterPreset,
+    type DateFilterSelection,
+    type DateRangeError,
+} from "./dateRangeFilter";
+import { buildSearchFilters, type MessageTypeFilter } from "./searchFilters";
+import {
+    buildHighlightRegex,
+    buildPreviewFromStrings,
+    collectSearchableStrings,
+    type SearchableStrings,
+} from "./searchPreview";
 
 type GlobalSearchResult = ClaudeMessage;
 
-type MessageTypeFilter = "all" | "user" | "assistant";
+const DATE_PRESET_LABEL_KEYS = {
+    all: "globalSearch.dateFilter.all",
+    "24h": "globalSearch.dateFilter.last24h",
+    "2d": "globalSearch.dateFilter.last2d",
+    "7d": "globalSearch.dateFilter.last7d",
+    "30d": "globalSearch.dateFilter.last30d",
+    "90d": "globalSearch.dateFilter.last90d",
+    custom: "globalSearch.dateFilter.custom",
+} as const satisfies Record<DateFilterPreset, string>;
+
+const DATE_ERROR_LABEL_KEYS = {
+    invalidRange: "globalSearch.dateFilter.invalidRange",
+    futureStart: "globalSearch.dateFilter.futureStart",
+} as const satisfies Record<DateRangeError, string>;
+
+// Keys pressed inside these controls belong to them (date spin, select/listbox
+// navigation, Enter to pick, Esc to close the popup) and must not drive the
+// result list.
+const OWN_KEYBOARD_SELECTOR =
+    'input[type="date"], select, [role="combobox"], [role="listbox"], [role="option"]';
 
 interface GlobalSearchModalProps {
     isOpen: boolean;
@@ -48,56 +85,6 @@ const MAX_RESULTS = 250;
 const sessionTitleCache = new Map<string, Record<string, string>>();
 const titleCacheKey = (project: ClaudeProject) => `${project.path}@${project.last_modified}`;
 const TITLE_FETCH_CONCURRENCY = 3;
-/**
- * Every string a result can be matched on, in display order. Mirrors the
- * backend scope (`search_in_value` walks message content, toolUse and
- * toolUseResult), so a hit inside a tool payload still gets a snippet
- * instead of "No preview available".
- */
-const collectSearchableText = (message: GlobalSearchResult): string => {
-    const parts: string[] = [];
-    const pushStrings = (value: unknown, depth = 0) => {
-        if (depth > 4 || value == null) return;
-        if (typeof value === "string") {
-            if (value.trim()) parts.push(value);
-        } else if (Array.isArray(value)) {
-            for (const v of value) pushStrings(v, depth + 1);
-        } else if (typeof value === "object") {
-            for (const v of Object.values(value as Record<string, unknown>)) pushStrings(v, depth + 1);
-        }
-    };
-
-    const content = message.content;
-    if (typeof content === "string") {
-        parts.push(content);
-    } else if (Array.isArray(content)) {
-        for (const item of content as ContentItem[]) {
-            switch (item.type) {
-                case "text":
-                    if ("text" in item) parts.push(item.text as string);
-                    break;
-                case "thinking":
-                    if ("thinking" in item) parts.push((item as { thinking: string }).thinking);
-                    break;
-                case "tool_use": {
-                    const tool = item as { name?: string; input?: unknown };
-                    if (tool.name) parts.push(tool.name);
-                    pushStrings(tool.input);
-                    break;
-                }
-                case "tool_result":
-                    pushStrings((item as { content?: unknown }).content);
-                    break;
-                default:
-                    pushStrings(item);
-            }
-        }
-    }
-    const extra = message as { toolUse?: unknown; toolUseResult?: unknown };
-    pushStrings(extra.toolUse);
-    pushStrings(extra.toolUseResult);
-    return parts.join(" ").replace(/\s+/g, " ");
-};
 
 type SearchResultGroup = {
     label: string;
@@ -114,6 +101,9 @@ export const GlobalSearchModal = ({
     const { t, i18n } = useTranslation();
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<GlobalSearchResult[]>([]);
+    // The query that produced `results`. Previews and highlights use it (not
+    // the live input), so typing does not rebuild every preview per keystroke.
+    const [lastSearchedQuery, setLastSearchedQuery] = useState("");
     const [isSearching, setIsSearching] = useState(false);
     const [selectedIndex, setSelectedIndex] = useState(0);
     // sessionId / actual_session_id → summary, filled lazily per project so
@@ -122,6 +112,18 @@ export const GlobalSearchModal = ({
     // Bumped when the modal closes or results change; abandons a title sweep.
     const titleSweepTokenRef = useRef(0);
     const [messageTypeFilter, setMessageTypeFilter] = useState<MessageTypeFilter>("all");
+    const [dateFilter, setDateFilter] = useState<DateFilterSelection>(DEFAULT_DATE_FILTER);
+    // Searches depend on the canonical selection, so typing a date (or editing
+    // dates that a relative preset ignores) does not re-search until the
+    // effective range actually changes.
+    const { preset: searchDatePreset, from: searchDateFrom, to: searchDateTo } = normalizeDateFilter(dateFilter);
+    const searchDateFilter = useMemo<DateFilterSelection>(
+        () => ({ preset: searchDatePreset, from: searchDateFrom, to: searchDateTo }),
+        [searchDatePreset, searchDateFrom, searchDateTo],
+    );
+    // Bumped per search request and on close; a response whose token is stale
+    // (a newer search started, e.g. while a date is being typed) is dropped.
+    const searchRequestTokenRef = useRef(0);
     const inputRef = useRef<HTMLInputElement>(null);
     const resultsContainerRef = useRef<HTMLDivElement>(null);
     const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -260,24 +262,30 @@ export const GlobalSearchModal = ({
             const hasAlternativeSource = hasNonClaudeProviders || hasCustomPaths || wslEnabled;
             const nativeClaudePath = claudePath || undefined;
             const wslProviders = wslEnabled ? getWslSearchableProviderIds(activeProviders) : undefined;
+            const requestToken = ++searchRequestTokenRef.current;
 
             if (trimmedQuery.length < 2 || (!claudePath && !hasAlternativeSource)) {
                 setResults([]);
+                setLastSearchedQuery("");
+                setIsSearching(false);
+                return;
+            }
+
+            // Relative date presets are evaluated against the time of this search.
+            const { filters, error: filterError } = buildSearchFilters(
+                { selectedProjectPath, messageTypeFilter, dateFilter: searchDateFilter },
+                new Date(),
+            );
+            if (filterError != null) {
+                // The filter bar shows the warning; never send an inverted range.
+                setResults([]);
+                setLastSearchedQuery("");
                 setIsSearching(false);
                 return;
             }
 
             setIsSearching(true);
             try {
-                const filters: Record<string, unknown> = {};
-                if (selectedProjectPath !== "all") {
-                    // Backend matches by directory name (last path segment), not full path
-                    const dirName = selectedProjectPath.split(/[\\/]/).pop() || selectedProjectPath;
-                    filters.projects = [dirName];
-                }
-                if (messageTypeFilter !== "all") {
-                    filters.messageType = messageTypeFilter;
-                }
                 const wslExcludedDistros = userMetadata?.settings?.wsl?.excludedDistros ?? [];
                 const useAllProvidersSearch = hasNonClaudeProviders || hasCustomPaths || wslEnabled;
                 const searchResults = await api<GlobalSearchResult[]>(
@@ -296,35 +304,53 @@ export const GlobalSearchModal = ({
                           }
                         : { claudePath: nativeClaudePath, query: trimmedQuery, filters, limit: MAX_RESULTS },
                 );
+                if (requestToken !== searchRequestTokenRef.current) return;
                 setResults(searchResults);
+                setLastSearchedQuery(trimmedQuery);
                 setSelectedIndex(0);
             } catch (error) {
+                if (requestToken !== searchRequestTokenRef.current) return;
                 console.error("Global search failed:", error);
                 setResults([]);
+                setLastSearchedQuery("");
                 toast.error(t("globalSearch.searchFailed"));
             } finally {
-                setIsSearching(false);
+                if (requestToken === searchRequestTokenRef.current) setIsSearching(false);
             }
         },
-        [claudePath, activeProviders, selectedProjectPath, messageTypeFilter, userMetadata, t],
+        [claudePath, activeProviders, selectedProjectPath, messageTypeFilter, searchDateFilter, userMetadata, t],
     );
+
+    // Latest performSearch for the debounce timer, so a timer armed before a
+    // filter change never runs a search with the old filters.
+    const performSearchRef = useRef(performSearch);
+    useEffect(() => {
+        performSearchRef.current = performSearch;
+    }, [performSearch]);
+
+    // Drop the pending debounced search and invalidate any in-flight response.
+    const cancelPendingSearch = useCallback(() => {
+        if (debounceTimeoutRef.current) {
+            clearTimeout(debounceTimeoutRef.current);
+            debounceTimeoutRef.current = null;
+        }
+        searchRequestTokenRef.current++;
+    }, []);
 
     // Handle input change with debounce
-    const handleInputChange = useCallback(
-        (e: React.ChangeEvent<HTMLInputElement>) => {
-            const value = e.target.value;
-            setQuery(value);
+    const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        setQuery(value);
 
-            if (debounceTimeoutRef.current) {
-                clearTimeout(debounceTimeoutRef.current);
-            }
+        if (debounceTimeoutRef.current) {
+            clearTimeout(debounceTimeoutRef.current);
+        }
 
-            debounceTimeoutRef.current = setTimeout(() => {
-                performSearch(value);
-            }, 300);
-        },
-        [performSearch],
-    );
+        debounceTimeoutRef.current = setTimeout(() => {
+            debounceTimeoutRef.current = null;
+            void performSearchRef.current(value);
+        }, 300);
+    }, []);
 
     // Navigate to selected result
     const handleSelectResult = useCallback(
@@ -441,6 +467,8 @@ export const GlobalSearchModal = ({
     const handleKeyDown = useCallback(
         (e: React.KeyboardEvent) => {
             if (flattenedResults.length === 0) return;
+            const target = e.target;
+            if (target instanceof Element && target.closest(OWN_KEYBOARD_SELECTOR) != null) return;
 
             switch (e.key) {
                 case "ArrowDown":
@@ -487,23 +515,29 @@ export const GlobalSearchModal = ({
         } else {
             // Cancel any in-flight result-resolution sweep.
             resolveTokenRef.current++;
+            // Drop the pending/in-flight search so it cannot repopulate a closed modal.
+            cancelPendingSearch();
+            setIsSearching(false);
             setQuery("");
             setResults([]);
+            setLastSearchedQuery("");
             setSelectedIndex(0);
             setSelectedProjectPath("all");
             setMessageTypeFilter("all");
+            setDateFilter(DEFAULT_DATE_FILTER);
             setSessionTitles({});
             titleSweepTokenRef.current++;
         }
-    }, [isOpen]);
+    }, [isOpen, cancelPendingSearch]);
 
     // Re-search when filters change. `query` is intentionally omitted —
     // keystroke-driven searches go through handleInputChange's debounce.
     // This effect only fires when performSearch identity changes (i.e., filter deps).
+    // It supersedes any pending debounced search, and also runs for short
+    // queries so results of a longer, cancelled query do not linger.
     useEffect(() => {
-        if (query.trim().length >= 2) {
-            performSearch(query);
-        }
+        cancelPendingSearch();
+        void performSearch(query);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [performSearch]);
 
@@ -516,38 +550,41 @@ export const GlobalSearchModal = ({
         };
     }, []);
 
-    // Searchable text per result, computed once per result set rather than on
-    // every keystroke/arrow re-render (250 rows × deep tool payload walks).
+    // Searchable strings per result, collected once per result set rather than
+    // on every keystroke/arrow re-render (250 rows × deep tool payload walks).
     const searchableTextByResult = useMemo(() => {
-        const map = new WeakMap<GlobalSearchResult, string>();
-        for (const result of results) map.set(result, collectSearchableText(result));
+        const map = new WeakMap<GlobalSearchResult, SearchableStrings>();
+        for (const result of results) map.set(result, collectSearchableStrings(result));
         return map;
     }, [results]);
 
+    // Preview per result for the query that produced the results (same query
+    // the highlighter uses); rebuilt only when a new result set arrives, not on
+    // keystrokes or arrow-key re-renders.
+    const previewByResult = useMemo(() => {
+        const map = new WeakMap<GlobalSearchResult, string | null>();
+        for (const result of results) {
+            const strings = searchableTextByResult.get(result) ?? collectSearchableStrings(result);
+            map.set(result, buildPreviewFromStrings(strings, lastSearchedQuery));
+        }
+        return map;
+    }, [results, searchableTextByResult, lastSearchedQuery]);
+
     // Get preview text centered around the search term
     const getPreviewText = (message: GlobalSearchResult): string => {
-        const fullText = searchableTextByResult.get(message) ?? collectSearchableText(message);
-        if (!fullText) return t("globalSearch.noPreview");
-
-
-        // Find search term position and show surrounding context
-        const trimmedQuery = query.trim().toLowerCase();
-        if (trimmedQuery.length >= 2) {
-            const lowerText = fullText.toLowerCase();
-            const matchIndex = lowerText.indexOf(trimmedQuery);
-            if (matchIndex !== -1) {
-                const contextRadius = 60;
-                const start = Math.max(0, matchIndex - contextRadius);
-                const end = Math.min(fullText.length, matchIndex + trimmedQuery.length + contextRadius);
-                const slice = fullText.slice(start, end);
-                const prefix = start > 0 ? "..." : "";
-                const suffix = end < fullText.length ? "..." : "";
-                return prefix + slice + suffix;
-            }
-        }
-
-        return fullText.slice(0, 150) + (fullText.length > 150 ? "..." : "");
+        const preview = previewByResult.has(message)
+            ? previewByResult.get(message)
+            : buildPreviewFromStrings(collectSearchableStrings(message), lastSearchedQuery);
+        return preview ?? t("globalSearch.noPreview");
     };
+
+    // Derived (not stored) so a custom range that becomes valid clears it.
+    const dateRangeError = buildDateRange(dateFilter, new Date()).error;
+
+    const handleDatePresetChange = useCallback((value: string) => {
+        if (!isDateFilterPreset(value)) return;
+        setDateFilter((prev) => ({ ...prev, preset: value }));
+    }, []);
 
     // Format timestamp
     const formatTimestamp = (timestamp: string): string => {
@@ -565,14 +602,7 @@ export const GlobalSearchModal = ({
     };
 
     // Memoize regex to avoid re-creation per result item
-    const highlightRegex = useMemo(() => {
-        const trimmed = query.trim();
-        if (!trimmed) return null;
-        return new RegExp(
-            `(${trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
-            "i",
-        );
-    }, [query]);
+    const highlightRegex = useMemo(() => buildHighlightRegex(lastSearchedQuery), [lastSearchedQuery]);
 
     const highlightText = (text: string): React.ReactNode => {
         if (!highlightRegex) return text;
@@ -623,8 +653,11 @@ export const GlobalSearchModal = ({
                     {query && !isSearching && (
                         <button
                             onClick={() => {
+                                cancelPendingSearch();
                                 setQuery("");
                                 setResults([]);
+                                setLastSearchedQuery("");
+                                setIsSearching(false);
                                 inputRef.current?.focus();
                             }}
                             className="p-1 hover:bg-muted rounded"
@@ -636,7 +669,7 @@ export const GlobalSearchModal = ({
                 </div>
 
                 {/* Filters Bar */}
-                <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-muted/20">
+                <div className="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-border bg-muted/20">
                     {/* Message Type Filter */}
                     <div className="flex items-center gap-1">
                         {(["all", "user", "assistant"] as const).map((type) => (
@@ -683,6 +716,61 @@ export const GlobalSearchModal = ({
                             </Select>
                         </>
                     )}
+
+                    {/* Date Filter */}
+                    <div className="w-px h-4 bg-border" />
+                    <div className="flex items-center gap-1.5">
+                        <CalendarDays className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                        <Select value={dateFilter.preset} onValueChange={handleDatePresetChange}>
+                            <SelectTrigger
+                                className="h-7 text-xs border-border w-32"
+                                aria-label={t("globalSearch.dateFilter.label")}
+                            >
+                                <SelectValue placeholder={t("globalSearch.dateFilter.all")} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {DATE_FILTER_PRESETS.map((preset) => (
+                                    <SelectItem key={preset} value={preset}>
+                                        {t(DATE_PRESET_LABEL_KEYS[preset])}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        {dateFilter.preset === "custom" && (
+                            <>
+                                <input
+                                    type="date"
+                                    value={dateFilter.from}
+                                    max={dateFilter.to || undefined}
+                                    onChange={(e) => {
+                                        const from = e.target.value;
+                                        setDateFilter((prev) => ({ ...prev, from }));
+                                    }}
+                                    aria-label={t("globalSearch.dateFilter.from")}
+                                    title={t("globalSearch.dateFilter.from")}
+                                    className="h-7 rounded-md border border-border bg-background px-1.5 text-xs text-foreground"
+                                />
+                                <span className="text-xs text-muted-foreground" aria-hidden="true">–</span>
+                                <input
+                                    type="date"
+                                    value={dateFilter.to}
+                                    min={dateFilter.from || undefined}
+                                    onChange={(e) => {
+                                        const to = e.target.value;
+                                        setDateFilter((prev) => ({ ...prev, to }));
+                                    }}
+                                    aria-label={t("globalSearch.dateFilter.to")}
+                                    title={t("globalSearch.dateFilter.to")}
+                                    className="h-7 rounded-md border border-border bg-background px-1.5 text-xs text-foreground"
+                                />
+                            </>
+                        )}
+                    </div>
+                    {dateRangeError != null && (
+                        <span role="alert" className="text-xs text-destructive">
+                            {t(DATE_ERROR_LABEL_KEYS[dateRangeError])}
+                        </span>
+                    )}
                 </div>
 
                 {/* Results */}
@@ -706,7 +794,7 @@ export const GlobalSearchModal = ({
                         </div>
                     )}
 
-                    {!isSearching && query.trim().length >= 2 && results.length === 0 && (
+                    {!isSearching && query.trim().length >= 2 && results.length === 0 && dateRangeError == null && (
                         <div className="px-4 py-8 text-center text-sm text-muted-foreground">
                             {t("globalSearch.noResults")}
                         </div>

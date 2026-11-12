@@ -129,10 +129,18 @@ fn build_matcher(query: &str) -> AhoCorasick {
 
 /// Extract project name from file path
 /// Path format: ~/.claude/projects/[project-name]/[session-file].jsonl
+///
+/// Subagent transcripts live two levels deeper, at
+/// `projects/[project-name]/[session-id]/subagents/agent-*.jsonl`. Taking the
+/// parent directory there would label every subagent hit "subagents", which
+/// groups them under a project that does not exist and keeps a project filter
+/// from ever matching them.
 fn extract_project_name(file_path: &PathBuf) -> Option<String> {
-    file_path
-        .parent()
-        .and_then(|p| p.file_name())
+    let mut dir = file_path.parent()?;
+    if dir.file_name().is_some_and(|name| name == "subagents") {
+        dir = dir.parent()?.parent()?;
+    }
+    dir.file_name()
         .and_then(|n| n.to_str())
         .map(std::string::ToString::to_string)
 }
@@ -648,6 +656,69 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_extract_project_name_uses_the_project_directory() {
+        let session = PathBuf::from("/home/u/.claude/projects/-work-proj/abc.jsonl");
+        assert_eq!(
+            extract_project_name(&session).as_deref(),
+            Some("-work-proj")
+        );
+
+        // Subagent transcripts sit under `<project>/<session>/subagents/`; the
+        // project is still the directory directly under `projects/`.
+        let subagent =
+            PathBuf::from("/home/u/.claude/projects/-work-proj/abc/subagents/agent-1.jsonl");
+        assert_eq!(
+            extract_project_name(&subagent).as_deref(),
+            Some("-work-proj")
+        );
+    }
+
+    #[test]
+    fn test_extract_project_name_keeps_a_plain_directory_named_like_a_session() {
+        // Only a directory literally named `subagents` is treated as the
+        // subagent layout.
+        let nested = PathBuf::from("/home/u/.claude/projects/-work-proj/subagents-notes/x.jsonl");
+        assert_eq!(
+            extract_project_name(&nested).as_deref(),
+            Some("subagents-notes")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_search_labels_subagent_hits_with_their_project() {
+        let temp_dir = TempDir::new().unwrap();
+        let projects_dir = temp_dir.path().join("projects");
+        let subagents_dir = projects_dir
+            .join("-work-proj")
+            .join("sess-1")
+            .join("subagents");
+        fs::create_dir_all(&subagents_dir).unwrap();
+        let mut file = File::create(subagents_dir.join("agent-1.jsonl")).unwrap();
+        writeln!(
+            file,
+            "{}",
+            create_sample_user_message("u1", "sess-1", "subagent_unique_needle")
+        )
+        .unwrap();
+
+        let results = search_messages(
+            temp_dir.path().to_string_lossy().to_string(),
+            "subagent_unique_needle".to_string(),
+            serde_json::json!({ "projects": ["-work-proj"] }),
+            Some(10),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            results.len(),
+            1,
+            "the project filter must reach subagent hits"
+        );
+        assert_eq!(results[0].project_name.as_deref(), Some("-work-proj"));
+    }
 
     fn create_sample_user_message(uuid: &str, session_id: &str, content: &str) -> String {
         format!(

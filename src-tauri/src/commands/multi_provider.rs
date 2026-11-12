@@ -674,6 +674,28 @@ pub async fn get_provider_message_offset(
     Ok(merged.iter().rev().position(|m| m.uuid == message_uuid))
 }
 
+/// Result cap handed to providers whose `search` takes no filters.
+///
+/// Those providers keep their newest `max_results` matches and the date range
+/// is only applied afterwards, so a range that lies behind the newest matches
+/// (a custom "from–to" in the past) would find nothing once more than
+/// `max_results` newer messages match the query. Claude and Codex take the
+/// filters themselves and narrow before they cap; the rest get a much larger
+/// cap whenever a date range is active, and the final truncate still bounds
+/// what is returned.
+const DATE_FILTERED_PROVIDER_LIMIT: usize = 20_000;
+
+fn provider_search_limit(max_results: usize, filters: &Value) -> usize {
+    if filters
+        .get("dateRange")
+        .is_some_and(|range| !range.is_null())
+    {
+        max_results.max(DATE_FILTERED_PROVIDER_LIMIT)
+    } else {
+        max_results
+    }
+}
+
 /// Search across all (or selected) providers
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -692,6 +714,7 @@ pub async fn search_all_providers(
     let search_filters =
         filters.unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::default()));
     crate::commands::session::validate_search_filters(&search_filters)?;
+    let provider_limit = provider_search_limit(max_results, &search_filters);
 
     let providers_to_search = active_providers.unwrap_or_else(|| {
         vec![
@@ -806,7 +829,7 @@ pub async fn search_all_providers(
 
     // Continue.dev
     if providers_to_search.iter().any(|p| p == "continue") {
-        match providers::continue_dev::search(&query, max_results) {
+        match providers::continue_dev::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Continue search failed: {e}");
@@ -816,7 +839,7 @@ pub async fn search_all_providers(
 
     // PearAI
     if providers_to_search.iter().any(|p| p == "pearai") {
-        match providers::pearai::search(&query, max_results) {
+        match providers::pearai::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("PearAI search failed: {e}");
@@ -826,7 +849,7 @@ pub async fn search_all_providers(
 
     // Gemini
     if providers_to_search.iter().any(|p| p == "gemini") {
-        match providers::gemini::search(&query, max_results) {
+        match providers::gemini::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Gemini search failed: {e}");
@@ -836,7 +859,7 @@ pub async fn search_all_providers(
 
     // Goose
     if providers_to_search.iter().any(|p| p == "goose") {
-        match providers::goose::search(&query, max_results) {
+        match providers::goose::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Goose search failed: {e}");
@@ -846,7 +869,7 @@ pub async fn search_all_providers(
 
     // Grok
     if providers_to_search.iter().any(|p| p == "grok") {
-        match providers::grok::search(&query, max_results) {
+        match providers::grok::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Grok search failed: {e}");
@@ -856,7 +879,7 @@ pub async fn search_all_providers(
 
     // Kimi
     if providers_to_search.iter().any(|p| p == "kimi") {
-        match providers::kimi::search(&query, max_results) {
+        match providers::kimi::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Kimi search failed: {e}");
@@ -866,7 +889,7 @@ pub async fn search_all_providers(
 
     // Mistral Vibe
     if providers_to_search.iter().any(|p| p == "vibe") {
-        match providers::vibe::search(&query, max_results) {
+        match providers::vibe::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Vibe search failed: {e}");
@@ -876,7 +899,7 @@ pub async fn search_all_providers(
 
     // ForgeCode
     if providers_to_search.iter().any(|p| p == "forgecode") {
-        match providers::forgecode::search(&query, max_results) {
+        match providers::forgecode::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("ForgeCode search failed: {e}");
@@ -886,7 +909,7 @@ pub async fn search_all_providers(
 
     // Kilo Code
     if providers_to_search.iter().any(|p| p == "kilo") {
-        match providers::kilo::search(&query, max_results) {
+        match providers::kilo::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Kilo search failed: {e}");
@@ -896,7 +919,7 @@ pub async fn search_all_providers(
 
     // OpenCode
     if providers_to_search.iter().any(|p| p == "opencode") {
-        match providers::opencode::search(&query, max_results) {
+        match providers::opencode::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("OpenCode search failed: {e}");
@@ -906,7 +929,7 @@ pub async fn search_all_providers(
 
     // Open Interpreter
     if providers_to_search.iter().any(|p| p == "openinterpreter") {
-        match providers::openinterpreter::search(&query, max_results) {
+        match providers::openinterpreter::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Open Interpreter search failed: {e}");
@@ -916,7 +939,7 @@ pub async fn search_all_providers(
 
     // Pi
     if providers_to_search.iter().any(|p| p == "pi") {
-        match providers::pi::search(&query, max_results) {
+        match providers::pi::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Pi search failed: {e}");
@@ -926,7 +949,7 @@ pub async fn search_all_providers(
 
     // oh-my-pi
     if providers_to_search.iter().any(|p| p == "ompi") {
-        match providers::ompi::search(&query, max_results) {
+        match providers::ompi::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("oh-my-pi search failed: {e}");
@@ -936,7 +959,7 @@ pub async fn search_all_providers(
 
     // Z Code
     if providers_to_search.iter().any(|p| p == "zcode") {
-        match providers::zcode::search(&query, max_results) {
+        match providers::zcode::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Z Code search failed: {e}");
@@ -946,7 +969,7 @@ pub async fn search_all_providers(
 
     // Qwen Code
     if providers_to_search.iter().any(|p| p == "qwen") {
-        match providers::qwen::search(&query, max_results) {
+        match providers::qwen::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Qwen search failed: {e}");
@@ -956,7 +979,7 @@ pub async fn search_all_providers(
 
     // Cline
     if providers_to_search.iter().any(|p| p == "cline") {
-        match providers::cline::search(&query, max_results) {
+        match providers::cline::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Cline search failed: {e}");
@@ -966,7 +989,7 @@ pub async fn search_all_providers(
 
     // Crush
     if providers_to_search.iter().any(|p| p == "crush") {
-        match providers::crush::search(&query, max_results) {
+        match providers::crush::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Crush search failed: {e}");
@@ -976,7 +999,7 @@ pub async fn search_all_providers(
 
     // Cursor
     if providers_to_search.iter().any(|p| p == "cursor") {
-        match providers::cursor::search(&query, max_results) {
+        match providers::cursor::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Cursor search failed: {e}");
@@ -986,7 +1009,7 @@ pub async fn search_all_providers(
 
     // Cursor Agent
     if providers_to_search.iter().any(|p| p == "cursor-agent") {
-        match providers::cursor_agent::search(&query, max_results) {
+        match providers::cursor_agent::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Cursor Agent search failed: {e}");
@@ -996,7 +1019,7 @@ pub async fn search_all_providers(
 
     // Aider
     if providers_to_search.iter().any(|p| p == "aider") {
-        match providers::aider::search(&query, max_results) {
+        match providers::aider::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Aider search failed: {e}");
@@ -1006,7 +1029,7 @@ pub async fn search_all_providers(
 
     // Amazon Q Developer CLI
     if providers_to_search.iter().any(|p| p == "amazonq") {
-        match providers::amazon_q::search(&query, max_results) {
+        match providers::amazon_q::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Amazon Q search failed: {e}");
@@ -1016,7 +1039,7 @@ pub async fn search_all_providers(
 
     // Antigravity
     if providers_to_search.iter().any(|p| p == "antigravity") {
-        match providers::antigravity::search(&query, max_results) {
+        match providers::antigravity::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Antigravity search failed: {e}");
@@ -1026,7 +1049,7 @@ pub async fn search_all_providers(
 
     // CodeBuddy
     if providers_to_search.iter().any(|p| p == "codebuddy") {
-        match providers::codebuddy::search(&query, max_results) {
+        match providers::codebuddy::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("CodeBuddy search failed: {e}");
@@ -1035,7 +1058,7 @@ pub async fn search_all_providers(
     }
     // Kiro
     if providers_to_search.iter().any(|p| p == "kiro") {
-        match providers::kiro::search(&query, max_results) {
+        match providers::kiro::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Kiro search failed: {e}");
@@ -1045,7 +1068,7 @@ pub async fn search_all_providers(
 
     // llm (Simon Willison)
     if providers_to_search.iter().any(|p| p == "llm") {
-        match providers::llm::search(&query, max_results) {
+        match providers::llm::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("llm search failed: {e}");
@@ -1055,7 +1078,7 @@ pub async fn search_all_providers(
 
     // Zed
     if providers_to_search.iter().any(|p| p == "zed") {
-        match providers::zed::search(&query, max_results) {
+        match providers::zed::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Zed search failed: {e}");
@@ -1065,7 +1088,7 @@ pub async fn search_all_providers(
 
     // OpenHands
     if providers_to_search.iter().any(|p| p == "openhands") {
-        match providers::openhands::search(&query, max_results) {
+        match providers::openhands::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("OpenHands search failed: {e}");
@@ -1075,7 +1098,7 @@ pub async fn search_all_providers(
 
     // Trae IDE
     if providers_to_search.iter().any(|p| p == "trae") {
-        match providers::trae::search(&query, max_results) {
+        match providers::trae::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Trae search failed: {e}");
@@ -1085,7 +1108,7 @@ pub async fn search_all_providers(
 
     // Unified GitHub Copilot search (CLI + Desktop + VS Code Copilot Chat).
     if providers_to_search.iter().any(|p| p == "copilot") {
-        match providers::copilot::search(&query, max_results) {
+        match providers::copilot::search(&query, provider_limit) {
             Ok(results) => all_results.extend(results),
             Err(e) => {
                 log::warn!("Copilot search failed: {e}");
@@ -1149,7 +1172,7 @@ pub async fn search_all_providers(
                         copilot_base.as_deref(),
                         canonical_vscode.as_deref(),
                         &query,
-                        max_results,
+                        provider_limit,
                     ) {
                         Ok(results) => all_results.extend(results),
                         Err(e) => {
@@ -1166,7 +1189,7 @@ pub async fn search_all_providers(
                         None,
                         Some(unc_path.as_path()),
                         &query,
-                        max_results,
+                        provider_limit,
                     ) {
                         Ok(results) => all_results.extend(results),
                         Err(e) => {
@@ -1317,6 +1340,36 @@ fn append_content_block(msg: &mut ClaudeMessage, block: Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_search_limit_is_unchanged_without_a_date_range() {
+        assert_eq!(provider_search_limit(250, &serde_json::json!({})), 250);
+        assert_eq!(
+            provider_search_limit(250, &serde_json::json!({ "messageType": "user" })),
+            250
+        );
+        // A null range is "no range" for the filters, so it must not widen the cap.
+        assert_eq!(
+            provider_search_limit(250, &serde_json::json!({ "dateRange": null })),
+            250
+        );
+    }
+
+    #[test]
+    fn provider_search_limit_widens_when_a_date_range_is_active() {
+        let filters = serde_json::json!({
+            "dateRange": ["2026-09-01T00:00:00.000Z", "2026-09-30T23:59:59.999Z"]
+        });
+        assert_eq!(
+            provider_search_limit(250, &filters),
+            DATE_FILTERED_PROVIDER_LIMIT
+        );
+        // A caller asking for more than the widened cap keeps its own number.
+        assert_eq!(
+            provider_search_limit(DATE_FILTERED_PROVIDER_LIMIT + 5, &filters),
+            DATE_FILTERED_PROVIDER_LIMIT + 5
+        );
+    }
 
     #[tokio::test]
     async fn load_provider_session_by_path_rejects_providers_without_a_lookup() {

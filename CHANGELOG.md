@@ -11,6 +11,23 @@ listed first. Every entry without a `-fork` suffix is upstream
 `jhlee0409/claude-code-history-viewer` and is left exactly as upstream wrote it; a version
 number appearing in the fork entries does not imply an upstream release of the same number.
 
+## [1.32.2-fork.3] - 2026-11-12
+
+Fork release: message search gets a date filter, and its results stop saying "no preview".
+
+### Added
+- **A date filter in message search** — the filter bar gains a period menu: all time, within 24 hours, 2 days, 7 days, 30 days or 90 days, or a custom range of two dates where either end may be left open. A relative window is measured from the moment the search runs; a custom range runs from 00:00:00 on the first date to 23:59:59.999 on the last, in local time. It is sent as the backend's existing `dateRange` filter, which already applied to every provider but had no control in the UI. A start after the end, or a start date in the future, shows a short warning and sends nothing instead of failing the search.
+
+### Fixed
+- **Search results said "No preview available" for most hits** — the backend matches text inside tool payloads (command output, file contents, tool inputs), but the preview was built from the message text alone, so a hit that lived in a tool result had no snippet to show. On this machine's transcripts, searching 匿名化 matched 5,651 messages and 4,923 of them (87%) had no preview. Upstream's 1.28.0 fix, already in this build, collects tool payloads too and removed the empty previews, but it stopped at four levels of nesting and joined every string before looking, so 135 hits (2.4%) still showed the start of the message instead of the match. The preview now looks at one string at a time, at any depth, and shows the matched text for every hit (0 misses on the same data, also for two other search terms). "No preview" now appears only when a message has no text at all.
+- **Subagent hits were grouped under a project called "subagents"** — a subagent transcript sits two folders below its project, and the search labelled each hit with its immediate parent folder. They now carry their project's name, and the project filter reaches them.
+- **A past date range found nothing on non-Claude providers** — those providers keep their newest 250 matches before the date range is applied, so a range further back than 250 newer matches came back empty. While a date range is active they are asked for up to 20,000.
+- While the search waits out its 300 ms typing delay, changing a filter now wins over the earlier query's results, and closing the dialog cancels the waiting search. Arrow keys and Enter typed into the date fields, and in the period menu, no longer move the result selection or close the dialog.
+
+### Known limits
+- The preview audit covered the Claude search path only. Codex and the other providers match on different text, so a hit there can still show the start of the message rather than the match.
+- A combining mark (a base letter plus a separate accent) can still be split at the edge of a preview.
+
 ## [1.32.2-fork.2] - 2026-11-12
 
 Fork release: GitHub Copilot messages get a per-message cost estimate in the gutter.
