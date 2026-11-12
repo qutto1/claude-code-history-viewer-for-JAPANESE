@@ -30,6 +30,8 @@
   "agentTaskGroup.transcript": "日誌:",
   "assistantMessageDetails.cacheCreation": "快取建立",
   "assistantMessageDetails.cacheRead": "快取讀取",
+  "assistantMessageDetails.copilotEstimateNote": "依 API 定價換算的估計值（未計入快取折扣）。Copilot 以訂閱／進階請求計費，因此這不是您的實際費用。",
+  "assistantMessageDetails.copilotPartialNote": "此輪多次呼叫了模型，但 Copilot 只記錄最後一次呼叫的 token，因此實際總量更高。",
   "assistantMessageDetails.cost": "費用",
   "assistantMessageDetails.costEstimated": "依據權杖用量估算；來源 JSONL 不包含 costUSD。",
   "assistantMessageDetails.duration": "耗時",

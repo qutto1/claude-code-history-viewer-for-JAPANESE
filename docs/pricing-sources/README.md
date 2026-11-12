@@ -20,7 +20,7 @@
 
 ## Rules the table follows
 
-- Only official first-party API prices. Subscription products and proxies (Cursor, Copilot, OpenCode, …) are never estimated; see `SOURCE_COST_ONLY_PROVIDER_IDS` in `calculations.ts`.
+- Only official first-party API prices. Subscription products and proxies (Cursor, Copilot, OpenCode, …) are never estimated in analytics; see `SOURCE_COST_ONLY_PROVIDER_IDS` in `calculations.ts`. **Fork exception:** the per-message gutter also shows an API list-price estimate for Copilot (`LIST_PRICE_ESTIMATE_PROVIDER_IDS` in `src/utils/messageCost.ts`), always marked as an estimate — and as a lower bound (`≥`) when the turn made tool calls, because Copilot records only the last model call's tokens. It never reaches the analytics totals.
 - A retired model keeps its last published rate with `deprecatedAt` set, so historical sessions stay priced. Unknown ids resolve to "unavailable" — never a default price.
 - `cacheWrite: null` means the provider publishes no per-token cache-write charge (Google bills cache storage per hour; xAI and most OpenAI models publish none).
 - `contextTiers[].minContextTokens` is the first token count billed at the long rate, using the provider's own definition: xAI and OpenAI "reach" the threshold (200000 / 272000); Google and MiniMax bill above it (200001 / 512001); Anthropic Claude Haiku 5.5 bills prompts over 100,000 (100001). `src-tauri/src/commands/stats.rs::context_tier_min_tokens` keeps its own list of these thresholds for aggregate stats — update it when adding a model with `contextTiers`.

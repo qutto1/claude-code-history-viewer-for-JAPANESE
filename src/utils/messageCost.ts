@@ -19,6 +19,7 @@ import {
   calculateModelPrice,
   hasExplicitModelPricing,
 } from "@/components/AnalyticsDashboard/utils/calculations";
+import pricingTable from "@/data/model-pricing.json";
 import type { ProviderId } from "@/types/core/session";
 
 /** The `usage` payload shape shared by every assistant message type. */
@@ -42,6 +43,12 @@ export interface MessageCostInput {
   usage?: MessageUsageLike;
   costUSD?: number | null;
   provider?: ProviderId;
+  /**
+   * The usage covers only part of the turn. Copilot records the tokens of the
+   * last model call only, so a turn that called tools (one model call per
+   * round) reports far fewer tokens than it used.
+   */
+  partialUsage?: boolean;
 }
 
 export interface MessageCost {
@@ -49,6 +56,10 @@ export interface MessageCost {
   cost: number;
   /** True when derived from the pricing table rather than read off the row. */
   isEstimated: boolean;
+  /** True when priced at the API list price for a subscription provider. */
+  isListPriceEstimate: boolean;
+  /** True when the usage covered only part of the turn: the real cost is higher. */
+  isLowerBound: boolean;
   /** Cache writes billed at the five-minute rate. */
   cacheCreationTokens5m: number;
   /** Cache writes billed at the one-hour rate. */
@@ -101,6 +112,61 @@ export const splitCacheCreation = (usage?: MessageUsageLike): CacheCreationSplit
 };
 
 /**
+ * Providers whose per-message figure is an API list-price equivalent rather
+ * than a reconstruction of what the user was charged.
+ *
+ * The analytics dashboard deliberately refuses to price these providers (see
+ * `SOURCE_COST_ONLY_PROVIDER_IDS` in `calculations.ts`): subscriptions and
+ * premium-request multipliers cannot be rebuilt from token counts, and totals
+ * there must stay authoritative. The message gutter is a different surface —
+ * a per-turn hint labelled as an estimate — so it opts in here, pricing the
+ * underlying model at the vendor's published API rate. The analytics gate is
+ * left untouched.
+ */
+const LIST_PRICE_ESTIMATE_PROVIDER_IDS: ReadonlySet<string> = new Set(["copilot"]);
+
+/** True when the gutter prices this provider at the API list price. */
+export const isListPriceEstimateProvider = (provider?: ProviderId): boolean =>
+  provider != null && LIST_PRICE_ESTIMATE_PROVIDER_IDS.has(provider);
+
+const PRICING_TABLE_KEYS: ReadonlySet<string> = new Set(
+  Object.keys((pricingTable as { models: Record<string, unknown> }).models),
+);
+
+/** A pricing key itself, or a pricing key followed by a `-YYYYMMDD` snapshot date. */
+const DATED_SNAPSHOT_SUFFIX = /-\d{8}$/;
+
+const isExactPricingKey = (modelSegment: string): boolean =>
+  PRICING_TABLE_KEYS.has(modelSegment) ||
+  PRICING_TABLE_KEYS.has(modelSegment.replace(DATED_SNAPSHOT_SUFFIX, ""));
+
+/**
+ * Candidate spellings of a model id to look up in the pricing table.
+ *
+ * Copilot reports Claude models with a dotted version (`claude-haiku-4.5`)
+ * while the table keys them with a hyphen (`claude-haiku-4-5`). GPT keys keep
+ * their dots (`gpt-4.1-mini`), so the conversion is limited to Claude names
+ * and the raw spelling is always tried first.
+ *
+ * The converted spelling is used only when it names a pricing key exactly
+ * (optionally with a `-YYYYMMDD` date). The table lookup matches by prefix, so
+ * an unknown version such as `claude-opus-4.9` would otherwise fall back to
+ * `claude-opus-4`, and `claude-opus-4.6-fast` would lose its fast-mode premium.
+ */
+const listPriceModelCandidates = (model: string): string[] => {
+  const segments = model.trim().split("/");
+  const last = (segments.at(-1) ?? "").toLowerCase();
+  const candidates = [model];
+  if (last.startsWith("claude-") && /\d\.\d/.test(last)) {
+    const hyphenated = last.replace(/(\d+)\.(\d+)/g, "$1-$2");
+    if (isExactPricingKey(hyphenated)) {
+      candidates.push([...segments.slice(0, -1), hyphenated].join("/"));
+    }
+  }
+  return candidates;
+};
+
+/**
  * Price one message, or return null when it cannot be priced — a user turn, a
  * `<synthetic>` model, or a provider whose rates we do not publish.
  */
@@ -109,19 +175,65 @@ export const calculateMessageCost = ({
   usage,
   costUSD,
   provider,
+  partialUsage = false,
 }: MessageCostInput): MessageCost | null => {
   const split = splitCacheCreation(usage);
 
   if (costUSD != null) {
-    return { cost: costUSD, isEstimated: false, ...split };
+    return {
+      cost: costUSD,
+      isEstimated: false,
+      isListPriceEstimate: false,
+      isLowerBound: false,
+      ...split,
+    };
   }
 
-  if (!model || !usage || !hasExplicitModelPricing(model, provider)) {
+  if (!model || !usage) {
     return null;
   }
 
+  const isListPriceEstimate = isListPriceEstimateProvider(provider);
+  // A list-price estimate needs the prompt side too: pricing only the output
+  // of a turn whose input is unknown (or reported as zero) would understate it
+  // badly (Copilot CLI records output tokens only).
+  if (isListPriceEstimate && !((usage.input_tokens ?? 0) > 0)) {
+    return null;
+  }
+
+  // List-price estimates look the model up as a bare model id, bypassing the
+  // provider-level billing gate that the analytics dashboard relies on.
+  const pricingProviderId = isListPriceEstimate ? undefined : provider;
+  const pricedModel = isListPriceEstimate
+    ? listPriceModelCandidates(model).find((candidate) =>
+      hasExplicitModelPricing(candidate, undefined),
+    )
+    : hasExplicitModelPricing(model, provider)
+      ? model
+      : undefined;
+  if (pricedModel == null) {
+    return null;
+  }
+
+  const priced = priceWithPricingTable(pricedModel, usage, split, pricingProviderId);
+  if (priced == null) {
+    return null;
+  }
+  return {
+    ...priced,
+    isListPriceEstimate,
+    isLowerBound: isListPriceEstimate && partialUsage,
+  };
+};
+
+const priceWithPricingTable = (
+  model: string,
+  usage: MessageUsageLike,
+  split: CacheCreationSplit,
+  pricingProviderId: ProviderId | undefined,
+): Omit<MessageCost, "isListPriceEstimate" | "isLowerBound"> | null => {
   const options = {
-    providerId: provider,
+    providerId: pricingProviderId,
     serviceTier: usage.service_tier,
     contextTokens: split.contextTokens,
     reasoningTokens: usage.reasoning_tokens,
@@ -165,6 +277,33 @@ export const formatCostExact = (usd: number): string => {
 
 /** The at-a-glance figure for the gutter: one decimal, so it steps by $0.1. */
 export const formatCostCompact = (usd: number): string => `$${usd.toFixed(1)}`;
+
+/**
+ * Prefix for figures that are not what the user was charged: `≥` when the
+ * usage covered only part of the turn, `~` for any other list-price estimate.
+ */
+const listPricePrefix = (cost: MessageCost): string => {
+  if (cost.isLowerBound) return "≥";
+  if (cost.isListPriceEstimate) return "~";
+  return "";
+};
+
+/**
+ * The gutter's compact cost label. List-price estimates carry `~`, lower
+ * bounds `≥`; every other provider keeps the plain `$0.0` figure.
+ */
+export const formatCostCompactLabel = (cost: MessageCost): string =>
+  `${listPricePrefix(cost)}${formatCostCompact(cost.cost)}`;
+
+/**
+ * The details card's cost figure: `~` for any table-derived estimate, with
+ * `≥` in front when the figure is a lower bound (`≥~$0.026`).
+ */
+export const formatCostDetailLabel = (cost: MessageCost): string => {
+  const exact = formatCostExact(cost.cost);
+  if (!cost.isEstimated) return exact;
+  return `${cost.isLowerBound ? "≥" : ""}~${exact}`;
+};
 
 /** Above this the gutter shows the cost in red so an expensive turn stands out. */
 export const EXPENSIVE_MESSAGE_COST_USD = 3;

@@ -5,8 +5,8 @@
  * 직접 수정하지 마세요.
  *
  * 생성 명령: pnpm run generate:i18n-types
- * 생성 시간: 2026-11-12T05:27:58.648Z
- * 총 키 개수: 2027
+ * 생성 시간: 2026-11-12T05:32:24.164Z
+ * 총 키 개수: 2029
  * Namespace 수: 11
  */
 
@@ -1528,7 +1528,7 @@ export type MessageKeys =
   | 'navigator.userOnly';
 
 /**
- * renderers namespace의 번역 키 (406개)
+ * renderers namespace의 번역 키 (408개)
  * 파일: locales/{lang}/renderers.json
  */
 export type RenderersKeys =
@@ -1563,6 +1563,8 @@ export type RenderersKeys =
   | 'agentTaskGroup.transcript'
   | 'assistantMessageDetails.cacheCreation'
   | 'assistantMessageDetails.cacheRead'
+  | 'assistantMessageDetails.copilotEstimateNote'
+  | 'assistantMessageDetails.copilotPartialNote'
   | 'assistantMessageDetails.cost'
   | 'assistantMessageDetails.costEstimated'
   | 'assistantMessageDetails.duration'
@@ -2356,6 +2358,8 @@ export type TranslationKey =
   | 'analytics.weeklyActivity'
   | 'assistantMessageDetails.cacheCreation'
   | 'assistantMessageDetails.cacheRead'
+  | 'assistantMessageDetails.copilotEstimateNote'
+  | 'assistantMessageDetails.copilotPartialNote'
   | 'assistantMessageDetails.cost'
   | 'assistantMessageDetails.costEstimated'
   | 'assistantMessageDetails.duration'

@@ -908,19 +908,8 @@ fn build_assistant_message(
         .map(String::from)
         .unwrap_or_else(|| format!("vscode-resp-{idx}-{counter}"));
 
-    let model = req.get("modelId").and_then(Value::as_str).map(String::from);
-    let usage = req
-        .get("completionTokens")
-        .and_then(Value::as_u64)
-        .map(|out| TokenUsage {
-            input_tokens: None,
-            output_tokens: Some(out as u32),
-            cache_creation_input_tokens: None,
-            cache_read_input_tokens: None,
-            reasoning_tokens: None,
-            service_tier: None,
-            ..Default::default()
-        });
+    let model = resolve_request_model(req);
+    let usage = extract_request_usage(req);
     let duration_ms = req.get("elapsedMs").and_then(Value::as_u64);
 
     let mut msg = build_provider_message(
@@ -937,6 +926,114 @@ fn build_assistant_message(
     msg.usage = usage;
     msg.duration_ms = duration_ms;
     Some(msg)
+}
+
+/// Read a token count as `u32`. Negative, fractional, and non-numeric values
+/// are ignored; counts beyond `u32::MAX` saturate.
+fn token_count(value: Option<&Value>) -> Option<u32> {
+    let n = value?.as_u64()?;
+    Some(u32::try_from(n).unwrap_or(u32::MAX))
+}
+
+/// Read `result.<section>.<key>` as a token count.
+fn result_token_count(req: &Value, section: &str, key: &str) -> Option<u32> {
+    token_count(req.get("result")?.get(section)?.get(key))
+}
+
+/// Token usage for one request. Each count is looked up on its own, so a
+/// source missing one count does not hide the other count from a later
+/// source:
+/// - input: `result.usage.promptTokens` → `result.metadata.promptTokens`.
+/// - output: `result.usage.completionTokens` → `result.metadata.outputTokens`
+///   → top-level `completionTokens` (older builds, output only).
+///
+/// These counts cover only the *last* model call of the request, not the
+/// whole turn. In agent mode one request calls the model once per entry in
+/// `result.metadata.toolCallRounds` (each tool call plus the final answer),
+/// but `result.usage` describes just the final call: in a real session with
+/// 21 rounds it held 24,262 prompt / 370 completion tokens, and its
+/// `promptTokenDetails` matched that one call's context window. They are
+/// stored as-is, so any cost derived from them is a lower bound for turns
+/// that used tools.
+///
+/// Cache counts are left unset: Copilot reports prompt composition only as
+/// percentages (`promptTokenDetails`), which cannot be turned into billed
+/// cache reads without guessing.
+fn extract_request_usage(req: &Value) -> Option<TokenUsage> {
+    let input_tokens = result_token_count(req, "usage", "promptTokens")
+        .or_else(|| result_token_count(req, "metadata", "promptTokens"));
+    let output_tokens = result_token_count(req, "usage", "completionTokens")
+        .or_else(|| result_token_count(req, "metadata", "outputTokens"))
+        .or_else(|| token_count(req.get("completionTokens")));
+    if input_tokens.is_none() && output_tokens.is_none() {
+        return None;
+    }
+
+    Some(TokenUsage {
+        input_tokens,
+        output_tokens,
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: None,
+        reasoning_tokens: None,
+        service_tier: None,
+        ..Default::default()
+    })
+}
+
+/// The model a request ran on. In Auto mode `modelId` is `copilot/auto`, and
+/// the model Copilot actually picked appears only in `result.details` as
+/// `"<display name> • <multiplier>x"` (e.g. `"Claude Haiku 4.5 • 1x"`). That
+/// display name is turned into `copilot/<slug>` (`copilot/claude-haiku-4.5`),
+/// the same shape as an explicitly chosen model (`copilot/gpt-5`), so
+/// per-model stats do not split one model into two rows. Anything else keeps
+/// `modelId` unchanged.
+fn resolve_request_model(req: &Value) -> Option<String> {
+    let model_id = req.get("modelId").and_then(Value::as_str)?;
+    let is_auto = model_id
+        .rsplit('/')
+        .next()
+        .is_some_and(|last| last.eq_ignore_ascii_case("auto"));
+    if is_auto {
+        if let Some(slug) = req
+            .get("result")
+            .and_then(|r| r.get("details"))
+            .and_then(Value::as_str)
+            .and_then(model_slug_from_details)
+        {
+            return Some(format!("copilot/{slug}"));
+        }
+    }
+    Some(model_id.to_string())
+}
+
+/// `"Claude Haiku 4.5 • 1x"` → `"claude-haiku-4.5"`. Returns `None` unless the
+/// text is a single display name followed by a `• <number>x` multiplier.
+/// A trailing parenthetical (`"Claude Sonnet 4.5 (Preview)"`) is dropped, and
+/// a display name of `"Auto"` is not a resolved model, so it yields `None`.
+fn model_slug_from_details(details: &str) -> Option<String> {
+    let (name, multiplier) = details.rsplit_once('\u{2022}')?;
+    let multiplier = multiplier.trim().strip_suffix(['x', 'X'])?;
+    let is_number = multiplier.chars().any(|c| c.is_ascii_digit())
+        && multiplier.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && multiplier.parse::<f64>().is_ok();
+    if !is_number {
+        return None;
+    }
+    let mut name = name.trim();
+    if name.ends_with(')') {
+        if let Some(open) = name.rfind('(') {
+            name = name[..open].trim_end();
+        }
+    }
+    if name.is_empty() || name.contains('\u{2022}') || name.eq_ignore_ascii_case("auto") {
+        return None;
+    }
+    Some(
+        name.split_whitespace()
+            .collect::<Vec<_>>()
+            .join("-")
+            .to_lowercase(),
+    )
 }
 
 // ============================================================================
@@ -1579,5 +1676,216 @@ mod tests {
         let requests = state["requests"].as_array().unwrap();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0]["message"]["text"], "b");
+    }
+
+    /// One request in the shape current Copilot Chat builds write: the
+    /// request arrives in the snapshot / an append, and `result` is set by a
+    /// later patch once the turn completes.
+    fn auto_request_log(result: Value) -> String {
+        build_log(
+            json!({"sessionId": "sess-usage", "creationDate": 1700000000000u64, "requests": []}),
+            &[
+                json!({
+                    "kind": 2,
+                    "k": ["requests"],
+                    "v": [{
+                        "requestId": "req-1",
+                        "responseId": "resp-1",
+                        "modelId": "copilot/auto",
+                        "timestamp": 1700000005000u64,
+                        "message": {"text": "q"},
+                        "response": [{"value": "a"}]
+                    }]
+                }),
+                json!({"kind": 1, "k": ["requests", 0, "result"], "v": result}),
+            ],
+        )
+    }
+
+    fn assistant_of(log: &str) -> ClaudeMessage {
+        let state = replay_session(log).unwrap();
+        messages_from_state(&state)
+            .into_iter()
+            .find(|m| m.message_type == "assistant")
+            .expect("assistant message")
+    }
+
+    #[test]
+    fn usage_and_model_come_from_patched_result() {
+        let msg = assistant_of(&auto_request_log(json!({
+            "details": "Claude Haiku 4.5 \u{2022} 1x",
+            "usage": {
+                "promptTokens": 24262,
+                "completionTokens": 370,
+                "promptTokenDetails": [{"category": "System", "label": "x", "percentageOfPrompt": 10}]
+            },
+            "metadata": {"promptTokens": 1, "outputTokens": 2}
+        })));
+        assert_eq!(msg.model.as_deref(), Some("copilot/claude-haiku-4.5"));
+        let usage = msg.usage.expect("usage");
+        assert_eq!(usage.input_tokens, Some(24262));
+        assert_eq!(usage.output_tokens, Some(370));
+        assert_eq!(usage.cache_read_input_tokens, None);
+        assert_eq!(usage.cache_creation_input_tokens, None);
+    }
+
+    #[test]
+    fn usage_falls_back_to_result_metadata() {
+        let msg = assistant_of(&auto_request_log(json!({
+            "metadata": {"promptTokens": 1000, "outputTokens": 50}
+        })));
+        let usage = msg.usage.expect("usage");
+        assert_eq!(usage.input_tokens, Some(1000));
+        assert_eq!(usage.output_tokens, Some(50));
+        // No details: Auto stays unresolved.
+        assert_eq!(msg.model.as_deref(), Some("copilot/auto"));
+    }
+
+    #[test]
+    fn usage_prefers_result_over_top_level_completion_tokens() {
+        let req = json!({
+            "completionTokens": 7,
+            "result": {"usage": {"promptTokens": 10, "completionTokens": 20}}
+        });
+        let usage = extract_request_usage(&req).unwrap();
+        assert_eq!(usage.input_tokens, Some(10));
+        assert_eq!(usage.output_tokens, Some(20));
+
+        // Legacy rows: output only.
+        let legacy = extract_request_usage(&json!({"completionTokens": 7})).unwrap();
+        assert_eq!(legacy.input_tokens, None);
+        assert_eq!(legacy.output_tokens, Some(7));
+
+        assert!(extract_request_usage(&json!({"result": {}})).is_none());
+    }
+
+    #[test]
+    fn usage_falls_back_per_count() {
+        // `result.usage` has only the output; the input comes from metadata.
+        let req = json!({"result": {
+            "usage": {"completionTokens": 370},
+            "metadata": {"promptTokens": 24262, "outputTokens": 999}
+        }});
+        let usage = extract_request_usage(&req).unwrap();
+        assert_eq!(usage.input_tokens, Some(24262));
+        assert_eq!(usage.output_tokens, Some(370));
+
+        // `result.usage` has only the input; the output comes from metadata.
+        let req = json!({"result": {
+            "usage": {"promptTokens": 100},
+            "metadata": {"promptTokens": 1, "outputTokens": 20}
+        }});
+        let usage = extract_request_usage(&req).unwrap();
+        assert_eq!(usage.input_tokens, Some(100));
+        assert_eq!(usage.output_tokens, Some(20));
+
+        // Input from `result.usage`, output only at the legacy top level.
+        let req = json!({
+            "completionTokens": 7,
+            "result": {"usage": {"promptTokens": 100}}
+        });
+        let usage = extract_request_usage(&req).unwrap();
+        assert_eq!(usage.input_tokens, Some(100));
+        assert_eq!(usage.output_tokens, Some(7));
+
+        // A malformed count in `result.usage` does not block the fallback.
+        let req = json!({"result": {
+            "usage": {"promptTokens": -1, "completionTokens": 5},
+            "metadata": {"promptTokens": 42}
+        }});
+        let usage = extract_request_usage(&req).unwrap();
+        assert_eq!(usage.input_tokens, Some(42));
+        assert_eq!(usage.output_tokens, Some(5));
+    }
+
+    #[test]
+    fn usage_ignores_malformed_counts_and_saturates() {
+        let req = json!({
+            "result": {"usage": {"promptTokens": -5, "completionTokens": 1.5}},
+            "completionTokens": "12"
+        });
+        // Every count is unusable, so there is no usage at all.
+        assert!(extract_request_usage(&req).is_none());
+
+        let huge = json!({"result": {"usage": {"promptTokens": 10_000_000_000u64}}});
+        let usage = extract_request_usage(&huge).unwrap();
+        assert_eq!(usage.input_tokens, Some(u32::MAX));
+        assert_eq!(usage.output_tokens, None);
+    }
+
+    #[test]
+    fn auto_model_resolves_display_names_to_slugs() {
+        for (details, slug) in [
+            ("Claude Haiku 4.5 \u{2022} 1x", "copilot/claude-haiku-4.5"),
+            ("GPT-5 mini \u{2022} 0x", "copilot/gpt-5-mini"),
+            ("Gemini 2.5 Pro \u{2022} 1x", "copilot/gemini-2.5-pro"),
+            ("Claude Opus 4.1 \u{2022} 10x", "copilot/claude-opus-4.1"),
+            ("GPT-4.1 \u{2022} 0.33x", "copilot/gpt-4.1"),
+            ("Claude Haiku 4.5 \u{2022} 1X", "copilot/claude-haiku-4.5"),
+            (
+                "Claude Sonnet 4.5 (Preview) \u{2022} 1x",
+                "copilot/claude-sonnet-4.5",
+            ),
+        ] {
+            let req = json!({"modelId": "copilot/auto", "result": {"details": details}});
+            assert_eq!(
+                resolve_request_model(&req).as_deref(),
+                Some(slug),
+                "{details}"
+            );
+        }
+    }
+
+    #[test]
+    fn model_falls_back_to_model_id_when_unresolvable() {
+        for details in [
+            "Claude Haiku 4.5",
+            "Claude Haiku 4.5 \u{2022} fast",
+            "\u{2022} 1x",
+            "Claude Haiku 4.5 \u{2022} x",
+            "a \u{2022} b \u{2022} 1x",
+            "Auto \u{2022} 1x",
+            "AUTO \u{2022} 1x",
+            "Auto (Preview) \u{2022} 1x",
+        ] {
+            let req = json!({"modelId": "copilot/auto", "result": {"details": details}});
+            assert_eq!(
+                resolve_request_model(&req).as_deref(),
+                Some("copilot/auto"),
+                "{details}"
+            );
+        }
+        // Explicitly chosen models are never rewritten, even with details.
+        let explicit = json!({
+            "modelId": "copilot/gpt-5",
+            "result": {"details": "Claude Haiku 4.5 \u{2022} 1x"}
+        });
+        assert_eq!(
+            resolve_request_model(&explicit).as_deref(),
+            Some("copilot/gpt-5")
+        );
+        assert!(resolve_request_model(&json!({})).is_none());
+
+        // The "auto" check on `modelId` ignores case.
+        for model_id in ["Copilot/Auto", "AUTO", "auto"] {
+            let req = json!({
+                "modelId": model_id,
+                "result": {"details": "GPT-5 mini \u{2022} 0x"}
+            });
+            assert_eq!(
+                resolve_request_model(&req).as_deref(),
+                Some("copilot/gpt-5-mini"),
+                "{model_id}"
+            );
+        }
+        // Only a whole last segment counts as auto.
+        let auto_mini = json!({
+            "modelId": "copilot/auto-mini",
+            "result": {"details": "GPT-5 mini \u{2022} 0x"}
+        });
+        assert_eq!(
+            resolve_request_model(&auto_mini).as_deref(),
+            Some("copilot/auto-mini")
+        );
     }
 }

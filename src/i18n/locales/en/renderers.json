@@ -30,6 +30,8 @@
   "agentTaskGroup.transcript": "Transcript:",
   "assistantMessageDetails.cacheCreation": "Cache Creation",
   "assistantMessageDetails.cacheRead": "Cache Read",
+  "assistantMessageDetails.copilotEstimateNote": "API list-price equivalent, with no cache discount. Copilot is billed by subscription / premium requests, so this is not your charge.",
+  "assistantMessageDetails.copilotPartialNote": "This turn called the model several times, but Copilot records only the last call's tokens, so the real total is higher.",
   "assistantMessageDetails.cost": "Cost",
   "assistantMessageDetails.costEstimated": "Estimated from token usage; the source JSONL did not include costUSD.",
   "assistantMessageDetails.duration": "Duration",

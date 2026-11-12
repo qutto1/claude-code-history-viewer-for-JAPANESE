@@ -30,6 +30,8 @@
   "agentTaskGroup.transcript": "トランスクリプト:",
   "assistantMessageDetails.cacheCreation": "キャッシュ作成",
   "assistantMessageDetails.cacheRead": "キャッシュ読み取り",
+  "assistantMessageDetails.copilotEstimateNote": "API定価換算の推定値です（キャッシュ割引は考慮していません）。Copilot はサブスクリプション／プレミアムリクエストで課金されるため、実際の請求額ではありません。",
+  "assistantMessageDetails.copilotPartialNote": "このターンはモデルを複数回呼び出していますが、Copilot は最後の1回分のトークンしか記録しないため、実際の合計はこれより大きくなります。",
   "assistantMessageDetails.cost": "料金",
   "assistantMessageDetails.costEstimated": "トークン使用量から推定した値です。元のJSONLにcostUSDが含まれていません。",
   "assistantMessageDetails.duration": "所要時間",

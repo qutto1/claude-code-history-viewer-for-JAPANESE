@@ -11,6 +11,22 @@ listed first. Every entry without a `-fork` suffix is upstream
 `jhlee0409/claude-code-history-viewer` and is left exactly as upstream wrote it; a version
 number appearing in the fork entries does not imply an upstream release of the same number.
 
+## [1.32.2-fork.2] - 2026-11-12
+
+Fork release: GitHub Copilot messages get a per-message cost estimate in the gutter.
+
+### Added
+- **Copilot messages show an estimated cost in the gutter, as Claude Code's do** — upstream deliberately never prices Copilot, because it is billed by subscription and premium requests and token counts cannot reconstruct a charge, and the Analytics views still do not. The message gutter now prices a Copilot turn at the model's published API rate and says so: `~$0.0` in the gutter, the exact figure in the details card, and a note that this is not what Copilot charges. The note also says no cache discount is applied, because Copilot reports cached input only as a share of the prompt. The estimate never reaches the analytics totals (`SOURCE_COST_ONLY_PROVIDER_IDS` is unchanged); the opt-in is `LIST_PRICE_ESTIMATE_PROVIDER_IDS` in `src/utils/messageCost.ts`.
+- **A turn that called tools is shown as a lower bound, `≥`** — VS Code records `result.usage` for the last model call of a request, not for the whole request. The one real session on this machine made 21 model calls over 115 seconds and recorded 24,262 prompt and 370 completion tokens, which is the final call's context window. A turn with tool calls therefore reads `≥$0.0` with a note that the real total is higher, rather than a figure that looks complete.
+- Copilot spells Claude versions with a dot (`claude-haiku-4.5`) where the price table uses dashes. The dotted form is converted only when the result is an exact table key, optionally with a `-YYYYMMDD` date, so a version the table does not list never inherits the price of its family's base model.
+
+### Fixed
+- **Copilot Chat turns from current VS Code builds had no token counts at all** — the provider read a top-level `completionTokens` that those builds do not write. It now reads `result.usage`, then `result.metadata`, with prompt and completion counts falling back independently. Token statistics for Copilot gain input tokens as a result; for turns that used tools they count only the last call, like the gutter.
+- **Auto mode hid the model that answered** — a request made in Auto mode recorded `copilot/auto`, so no price could be found. The model named in the turn's result details (for example "Claude Haiku 4.5") is used instead, as `copilot/claude-haiku-4.5`, the same shape an explicitly chosen model has, so per-model statistics do not split in two. "Auto" itself and a trailing "(Preview)" are not taken as a model name.
+
+### Not covered
+- **Copilot CLI turns show no cost.** Its sessions record only output tokens (the usage events are not written to disk), and an output-only figure would be a misleading fraction of the real cost.
+
 ## [1.32.2-fork.1] - 2026-11-12
 
 Fork release rebased onto upstream **v1.32.2**. The fork was last aligned with upstream 1.26.3; 112 upstream commits came in (see the upstream entries for 1.27.0 through 1.32.2 below), and 38 files conflicted.

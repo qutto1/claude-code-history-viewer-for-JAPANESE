@@ -30,6 +30,8 @@
   "agentTaskGroup.transcript": "日志:",
   "assistantMessageDetails.cacheCreation": "缓存创建",
   "assistantMessageDetails.cacheRead": "缓存读取",
+  "assistantMessageDetails.copilotEstimateNote": "按 API 标价折算的估算值（未计入缓存折扣）。Copilot 按订阅/高级请求计费，因此这不是您的实际费用。",
+  "assistantMessageDetails.copilotPartialNote": "此轮多次调用了模型，但 Copilot 只记录最后一次调用的 token，因此实际总量更高。",
   "assistantMessageDetails.cost": "费用",
   "assistantMessageDetails.costEstimated": "根据令牌用量估算；源 JSONL 不包含 costUSD。",
   "assistantMessageDetails.duration": "耗时",

@@ -30,8 +30,9 @@ import {
   EXPENSIVE_MESSAGE_COST_USD,
   NEGLIGIBLE_MESSAGE_COST_USD,
   calculateMessageCost,
-  formatCostCompact,
-  formatCostExact,
+  formatCostCompactLabel,
+  formatCostDetailLabel,
+  isListPriceEstimateProvider,
 } from "../../../utils/messageCost";
 import { hasSystemCommandContent } from "../helpers/messageHelpers";
 import type { MessageGutterProps } from "../types";
@@ -166,12 +167,20 @@ export const MessageGutter: React.FC<MessageGutterRenderProps> = ({
   const assistant = message.type === "assistant" ? message : null;
   const usage = assistant?.usage;
   const shortModelName = assistant?.model ? getShortModelName(assistant.model) : null;
+  // Copilot records only the last model call's tokens. A turn that called a
+  // tool made several calls, so its usage — and the cost — is a lower bound.
+  const hasToolCall =
+    assistant != null &&
+    (assistant.toolUse != null ||
+      (Array.isArray(assistant.content) &&
+        assistant.content.some((item) => item.type === "tool_use")));
   const messageCost = assistant
     ? calculateMessageCost({
       model: assistant.model,
       usage: assistant.usage,
       costUSD: assistant.costUSD,
       provider: assistant.provider,
+      partialUsage: isListPriceEstimateProvider(assistant.provider) && hasToolCall,
     })
     : null;
   // A message with no model, no usage, or a provider whose billing cannot be
@@ -234,7 +243,7 @@ export const MessageGutter: React.FC<MessageGutterRenderProps> = ({
                     : GUTTER_EMPHASIS
               )}
             >
-              {formatCostCompact(messageCost.cost)}
+              {formatCostCompactLabel(messageCost)}
             </span>
           )}
           {hasDetails && (
@@ -291,8 +300,18 @@ export const MessageGutter: React.FC<MessageGutterRenderProps> = ({
                 {assistant?.durationMs ? <p>{t("assistantMessageDetails.duration")}: {formatLatency(assistant.durationMs)}</p> : null}
                 {messageCost != null && (
                   <p className="mt-1 pt-1 border-t border-border">
-                    {t("assistantMessageDetails.cost")}: {messageCost.isEstimated ? `~${formatCostExact(messageCost.cost)}` : formatCostExact(messageCost.cost)}
+                    {t("assistantMessageDetails.cost")}: {formatCostDetailLabel(messageCost)}
                     {messageCost.isEstimated ? <span className="ml-1 opacity-70">({t("assistantMessageDetails.estimated")})</span> : null}
+                  </p>
+                )}
+                {messageCost != null && messageCost.isListPriceEstimate && (
+                  <p className="mt-0.5 text-px10 leading-snug opacity-70">
+                    {t("assistantMessageDetails.copilotEstimateNote")}
+                  </p>
+                )}
+                {messageCost != null && messageCost.isLowerBound && (
+                  <p className="mt-0.5 text-px10 leading-snug opacity-70">
+                    {t("assistantMessageDetails.copilotPartialNote")}
                   </p>
                 )}
                 <HoverCardArrow className="fill-popover" width={10} height={5} />
