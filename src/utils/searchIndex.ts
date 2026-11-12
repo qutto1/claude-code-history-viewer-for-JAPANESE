@@ -13,7 +13,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 };
 
-const hasStringProperty = (obj: Record<string, unknown>, key: string): boolean => {
+const hasStringProperty = (
+  obj: Record<string, unknown>,
+  key: string,
+): boolean => {
   return key in obj && typeof obj[key] === "string";
 };
 
@@ -111,46 +114,76 @@ const extractSearchableText = (
             }
             // tool_use: name + input values (file_path, command, query 등) (#429)
             if (itemType === "tool_use") {
-              if (hasStringProperty(item, "name")) parts.push(item.name as string);
-              if (isRecord(item.input)) collectInputValues(item.input, parts, { remaining: MAX_INPUT_LENGTH });
+              if (hasStringProperty(item, "name"))
+                parts.push(item.name as string);
+              if (isRecord(item.input))
+                collectInputValues(item.input, parts, {
+                  remaining: MAX_INPUT_LENGTH,
+                });
             }
             // tool_result: content
-            if (itemType === "tool_result" && hasStringProperty(item, "content")) {
+            if (
+              itemType === "tool_result" &&
+              hasStringProperty(item, "content")
+            ) {
               parts.push(item.content as string);
             }
             // server_tool_use: name + input values (#429)
             if (itemType === "server_tool_use") {
-              if (hasStringProperty(item, "name")) parts.push(item.name as string);
-              if (isRecord(item.input)) collectInputValues(item.input, parts, { remaining: MAX_INPUT_LENGTH });
+              if (hasStringProperty(item, "name"))
+                parts.push(item.name as string);
+              if (isRecord(item.input))
+                collectInputValues(item.input, parts, {
+                  remaining: MAX_INPUT_LENGTH,
+                });
             }
             // web_search_tool_result: titles and urls
-            if (itemType === "web_search_tool_result" && isRecord(item.content)) {
+            if (
+              itemType === "web_search_tool_result" &&
+              isRecord(item.content)
+            ) {
               extractWebSearchResults(item.content, parts);
-            } else if (itemType === "web_search_tool_result" && Array.isArray(item.content)) {
+            } else if (
+              itemType === "web_search_tool_result" &&
+              Array.isArray(item.content)
+            ) {
               for (const result of item.content) {
                 if (isRecord(result)) {
-                  if (hasStringProperty(result, "title")) parts.push(result.title as string);
-                  if (hasStringProperty(result, "url")) parts.push(result.url as string);
+                  if (hasStringProperty(result, "title"))
+                    parts.push(result.title as string);
+                  if (hasStringProperty(result, "url"))
+                    parts.push(result.url as string);
                 }
               }
             }
             // document: title, context
             if (itemType === "document") {
-              if (hasStringProperty(item, "title")) parts.push(item.title as string);
-              if (hasStringProperty(item, "context")) parts.push(item.context as string);
+              if (hasStringProperty(item, "title"))
+                parts.push(item.title as string);
+              if (hasStringProperty(item, "context"))
+                parts.push(item.context as string);
               // Also extract text content from PlainTextSource
-              if (isRecord(item.source) && (item.source as Record<string, unknown>).type === "text") {
+              if (
+                isRecord(item.source) &&
+                (item.source as Record<string, unknown>).type === "text"
+              ) {
                 const source = item.source as Record<string, unknown>;
-                if (hasStringProperty(source, "data")) parts.push(source.data as string);
+                if (hasStringProperty(source, "data"))
+                  parts.push(source.data as string);
               }
             }
             // search_result: title, source, content texts
             if (itemType === "search_result") {
-              if (hasStringProperty(item, "title")) parts.push(item.title as string);
-              if (hasStringProperty(item, "source")) parts.push(item.source as string);
+              if (hasStringProperty(item, "title"))
+                parts.push(item.title as string);
+              if (hasStringProperty(item, "source"))
+                parts.push(item.source as string);
               if (Array.isArray(item.content)) {
                 for (const textContent of item.content) {
-                  if (isRecord(textContent) && hasStringProperty(textContent, "text")) {
+                  if (
+                    isRecord(textContent) &&
+                    hasStringProperty(textContent, "text")
+                  ) {
                     parts.push(textContent.text as string);
                   }
                 }
@@ -158,54 +191,94 @@ const extractSearchableText = (
             }
             // mcp_tool_use: server_name, tool_name + input values (#429)
             if (itemType === "mcp_tool_use") {
-              if (hasStringProperty(item, "server_name")) parts.push(item.server_name as string);
-              if (hasStringProperty(item, "tool_name")) parts.push(item.tool_name as string);
-              if (isRecord(item.input)) collectInputValues(item.input, parts, { remaining: MAX_INPUT_LENGTH });
+              if (hasStringProperty(item, "server_name"))
+                parts.push(item.server_name as string);
+              if (hasStringProperty(item, "tool_name"))
+                parts.push(item.tool_name as string);
+              if (isRecord(item.input))
+                collectInputValues(item.input, parts, {
+                  remaining: MAX_INPUT_LENGTH,
+                });
             }
             // mcp_tool_result: text content
             if (itemType === "mcp_tool_result") {
               extractMCPToolResultText(item.content, parts);
             }
             // web_fetch_tool_result: url, title
-            if (itemType === "web_fetch_tool_result" && isRecord(item.content)) {
+            if (
+              itemType === "web_fetch_tool_result" &&
+              isRecord(item.content)
+            ) {
               const content = item.content as Record<string, unknown>;
-              if (hasStringProperty(content, "url")) parts.push(content.url as string);
+              if (hasStringProperty(content, "url"))
+                parts.push(content.url as string);
               if (isRecord(content.content)) {
                 const doc = content.content as Record<string, unknown>;
-                if (hasStringProperty(doc, "title")) parts.push(doc.title as string);
+                if (hasStringProperty(doc, "title"))
+                  parts.push(doc.title as string);
               }
             }
             // code_execution_tool_result: stdout, stderr
-            if (itemType === "code_execution_tool_result" && isRecord(item.content)) {
+            if (
+              itemType === "code_execution_tool_result" &&
+              isRecord(item.content)
+            ) {
               const content = item.content as Record<string, unknown>;
-              if (hasStringProperty(content, "stdout")) parts.push(content.stdout as string);
-              if (hasStringProperty(content, "stderr")) parts.push(content.stderr as string);
+              if (hasStringProperty(content, "stdout"))
+                parts.push(content.stdout as string);
+              if (hasStringProperty(content, "stderr"))
+                parts.push(content.stderr as string);
             }
             // bash_code_execution_tool_result: stdout, stderr
-            if (itemType === "bash_code_execution_tool_result" && isRecord(item.content)) {
+            if (
+              itemType === "bash_code_execution_tool_result" &&
+              isRecord(item.content)
+            ) {
               const content = item.content as Record<string, unknown>;
-              if (hasStringProperty(content, "stdout")) parts.push(content.stdout as string);
-              if (hasStringProperty(content, "stderr")) parts.push(content.stderr as string);
+              if (hasStringProperty(content, "stdout"))
+                parts.push(content.stdout as string);
+              if (hasStringProperty(content, "stderr"))
+                parts.push(content.stderr as string);
             }
             // text_editor_code_execution_tool_result: path, content
-            if (itemType === "text_editor_code_execution_tool_result" && isRecord(item.content)) {
+            if (
+              itemType === "text_editor_code_execution_tool_result" &&
+              isRecord(item.content)
+            ) {
               const content = item.content as Record<string, unknown>;
-              if (hasStringProperty(content, "path")) parts.push(content.path as string);
-              if (hasStringProperty(content, "content")) parts.push(content.content as string);
+              if (hasStringProperty(content, "path"))
+                parts.push(content.path as string);
+              if (hasStringProperty(content, "content"))
+                parts.push(content.content as string);
             }
             // tool_search_tool_result: tool names, descriptions
-            if (itemType === "tool_search_tool_result" && Array.isArray(item.content)) {
+            if (
+              itemType === "tool_search_tool_result" &&
+              Array.isArray(item.content)
+            ) {
               for (const result of item.content) {
                 if (isRecord(result)) {
-                  if (hasStringProperty(result, "tool_name")) parts.push(result.tool_name as string);
-                  if (hasStringProperty(result, "server_name")) parts.push(result.server_name as string);
-                  if (hasStringProperty(result, "description")) parts.push(result.description as string);
+                  if (hasStringProperty(result, "tool_name"))
+                    parts.push(result.tool_name as string);
+                  if (hasStringProperty(result, "server_name"))
+                    parts.push(result.server_name as string);
+                  if (hasStringProperty(result, "description"))
+                    parts.push(result.description as string);
                 }
               }
             }
           }
         }
       }
+    }
+
+    const compactMetadata: unknown =
+      message.type === "system" ? message.compactMetadata : undefined;
+    if (
+      isRecord(compactMetadata) &&
+      hasStringProperty(compactMetadata, "warning")
+    ) {
+      parts.push(compactMetadata.warning as string);
     }
 
     // toolUse name 추출
@@ -248,7 +321,10 @@ const extractSearchableText = (
 };
 
 // Helper: Extract text from web search results
-const extractWebSearchResults = (content: Record<string, unknown>, parts: string[]): void => {
+const extractWebSearchResults = (
+  content: Record<string, unknown>,
+  parts: string[],
+): void => {
   if (hasStringProperty(content, "title")) parts.push(content.title as string);
   if (hasStringProperty(content, "url")) parts.push(content.url as string);
 };
@@ -281,7 +357,10 @@ const extractToolIds = (message: ClaudeMessage): string => {
             ids.push(item.id as string);
           }
           // tool_result의 tool_use_id
-          if (item.type === "tool_result" && hasStringProperty(item, "tool_use_id")) {
+          if (
+            item.type === "tool_result" &&
+            hasStringProperty(item, "tool_use_id")
+          ) {
             ids.push(item.tool_use_id as string);
           }
         }
@@ -374,7 +453,10 @@ class MessageSearchIndex {
   // 인덱스 구축 (메시지 로드 시 1회 호출) - 청크 단위 비동기 처리
   build(messages: ClaudeMessage[]): void {
     // Skip if already built with same messages or currently building
-    if (this.messages === messages && (this.isBuilt || this.messages.length > 0)) {
+    if (
+      this.messages === messages &&
+      (this.isBuilt || this.messages.length > 0)
+    ) {
       return;
     }
 
@@ -395,7 +477,9 @@ class MessageSearchIndex {
     let currentIndex = 0;
 
     const processChunk = (deadline?: IdleDeadline) => {
-      const timeLimit = deadline ? () => deadline.timeRemaining() > 2 : () => true;
+      const timeLimit = deadline
+        ? () => deadline.timeRemaining() > 2
+        : () => true;
       const endIndex = Math.min(currentIndex + CHUNK_SIZE, messages.length);
 
       for (let i = currentIndex; i < endIndex && timeLimit(); i++) {
@@ -429,7 +513,14 @@ class MessageSearchIndex {
       if (currentIndex < messages.length) {
         // 다음 청크를 idle callback으로 예약 (UI 반응성 우선)
         if ("requestIdleCallback" in window) {
-          (window as Window & { requestIdleCallback: (cb: IdleRequestCallback, opts?: { timeout: number }) => number }).requestIdleCallback(processChunk, { timeout: 2000 });
+          (
+            window as Window & {
+              requestIdleCallback: (
+                cb: IdleRequestCallback,
+                opts?: { timeout: number },
+              ) => number;
+            }
+          ).requestIdleCallback(processChunk, { timeout: 2000 });
         } else {
           setTimeout(processChunk, YIELD_INTERVAL_MS);
         }
@@ -437,14 +528,23 @@ class MessageSearchIndex {
         // 완료
         this.isBuilt = true;
         if (import.meta.env.DEV) {
-          console.log(`[SearchIndex] Built index for ${messages.length} messages`);
+          console.log(
+            `[SearchIndex] Built index for ${messages.length} messages`,
+          );
         }
       }
     };
 
     // 첫 청크를 idle callback으로 시작
     if ("requestIdleCallback" in window) {
-      (window as Window & { requestIdleCallback: (cb: IdleRequestCallback, opts?: { timeout: number }) => number }).requestIdleCallback(processChunk, { timeout: 2000 });
+      (
+        window as Window & {
+          requestIdleCallback: (
+            cb: IdleRequestCallback,
+            opts?: { timeout: number },
+          ) => number;
+        }
+      ).requestIdleCallback(processChunk, { timeout: 2000 });
     } else {
       setTimeout(processChunk, YIELD_INTERVAL_MS);
     }
@@ -468,14 +568,20 @@ class MessageSearchIndex {
   // 검색 실행
   search(
     query: string,
-    filterType: SearchFilterType = "content"
-  ): Array<{ messageUuid: string; messageIndex: number; matchIndex: number; matchCount: number }> {
+    filterType: SearchFilterType = "content",
+  ): Array<{
+    messageUuid: string;
+    messageIndex: number;
+    matchIndex: number;
+    matchCount: number;
+  }> {
     if (!this.isBuilt || !query.trim()) {
       return [];
     }
 
     const lowerQuery = query.toLowerCase();
-    const index = filterType === "toolId" ? this.toolIdIndex : this.contentIndex;
+    const index =
+      filterType === "toolId" ? this.toolIdIndex : this.contentIndex;
 
     // FlexSearch 검색 (메시지 레벨)
     const results = index.search(lowerQuery, {
@@ -486,7 +592,10 @@ class MessageSearchIndex {
     // 매치된 메시지 UUID 수집
     const matchedUuids = new Set<string>();
     // FlexSearch's enriched result type is complex; cast to the shape we actually consume.
-    const enrichedResults = results as unknown as Array<{ field: string; result: (string | EnrichedResult)[] }>;
+    const enrichedResults = results as unknown as Array<{
+      field: string;
+      result: (string | EnrichedResult)[];
+    }>;
     enrichedResults.forEach((fieldResult) => {
       if (fieldResult.result) {
         fieldResult.result.forEach((item: string | EnrichedResult) => {
@@ -497,7 +606,12 @@ class MessageSearchIndex {
     });
 
     // 각 메시지에서 모든 매치 추출
-    const allMatches: Array<{ messageUuid: string; messageIndex: number; matchIndex: number; matchCount: number }> = [];
+    const allMatches: Array<{
+      messageUuid: string;
+      messageIndex: number;
+      matchIndex: number;
+      matchCount: number;
+    }> = [];
 
     matchedUuids.forEach((uuid) => {
       const messageIndex = this.messageMap.get(uuid);
@@ -527,12 +641,12 @@ class MessageSearchIndex {
     });
 
     // 완전 역순 정렬: 아래에서 위로 탐색 (최신 메시지의 마지막 매치부터)
-  allMatches.sort((a, b) => {
-    if (a.messageIndex !== b.messageIndex) {
-      return b.messageIndex - a.messageIndex; // newest messages first
-    }
-    return b.matchIndex - a.matchIndex; // last match within a message first
-  });
+    allMatches.sort((a, b) => {
+      if (a.messageIndex !== b.messageIndex) {
+        return b.messageIndex - a.messageIndex; // newest messages first
+      }
+      return b.matchIndex - a.matchIndex; // last match within a message first
+    });
 
     return allMatches;
   }
@@ -554,7 +668,12 @@ export const messageSearchIndex = new MessageSearchIndex();
 // Web Worker-based Search Index
 // ============================================================================
 
-type SearchResult = { messageUuid: string; messageIndex: number; matchIndex: number; matchCount: number };
+type SearchResult = {
+  messageUuid: string;
+  messageIndex: number;
+  matchIndex: number;
+  matchCount: number;
+};
 
 let worker: Worker | null = null;
 let workerReady = false;
@@ -563,7 +682,10 @@ let workerReady = false;
 // is in flight or already ready.
 let workerBuildInFlight = false;
 let lastBuildMessagesRef: ClaudeMessage[] | null = null;
-const pendingSearchCallbacks = new Map<number, (results: SearchResult[]) => void>();
+const pendingSearchCallbacks = new Map<
+  number,
+  (results: SearchResult[]) => void
+>();
 const pendingSearchTimeouts = new Map<number, ReturnType<typeof setTimeout>>();
 const SEARCH_TIMEOUT_MS = 5000;
 let searchIdCounter = 0;
@@ -593,14 +715,18 @@ function resolveAllPendingSearches(): void {
 function getWorker(): Worker | null {
   if (worker) return worker;
   try {
-    worker = new Worker(new URL("./searchWorker.ts", import.meta.url), { type: "module" });
+    worker = new Worker(new URL("./searchWorker.ts", import.meta.url), {
+      type: "module",
+    });
     worker.onmessage = (event) => {
       const msg = event.data;
       if (msg.type === "build-complete") {
         workerReady = true;
         workerBuildInFlight = false;
         if (import.meta.env.DEV) {
-          console.log(`[SearchIndex Worker] Index built for ${msg.count} messages`);
+          console.log(
+            `[SearchIndex Worker] Index built for ${msg.count} messages`,
+          );
         }
       } else if (msg.type === "search-result") {
         resolveAndCleanupSearch(msg.id, msg.results);
@@ -628,19 +754,23 @@ export const buildSearchIndex = (messages: ClaudeMessage[]): void => {
   const w = getWorker();
   if (w) {
     // De-dup: skip if the same messages reference is already building or built.
-    if (lastBuildMessagesRef === messages && (workerBuildInFlight || workerReady)) {
+    if (
+      lastBuildMessagesRef === messages &&
+      (workerBuildInFlight || workerReady)
+    ) {
       return;
     }
     workerReady = false;
     workerBuildInFlight = true;
     lastBuildMessagesRef = messages;
     // Send minimal message data to worker (avoid transferring unnecessary fields)
-    const minimalMessages = messages.map(m => ({
+    const minimalMessages = messages.map((m) => ({
       uuid: m.uuid,
       type: m.type,
       content: m.content,
       toolUse: (m as unknown as Record<string, unknown>).toolUse,
       toolUseResult: (m as unknown as Record<string, unknown>).toolUseResult,
+      compactMetadata: (m as unknown as Record<string, unknown>).compactMetadata,
     }));
     w.postMessage({ type: "build", messages: minimalMessages });
   } else {
@@ -651,7 +781,7 @@ export const buildSearchIndex = (messages: ClaudeMessage[]): void => {
 
 export const searchMessagesAsync = (
   query: string,
-  filterType: SearchFilterType = "content"
+  filterType: SearchFilterType = "content",
 ): Promise<SearchResult[]> => {
   const w = getWorker();
   if (w && workerReady) {
@@ -662,7 +792,9 @@ export const searchMessagesAsync = (
       // drops the message or the search hangs.
       const timer = setTimeout(() => {
         if (import.meta.env.DEV) {
-          console.warn(`[SearchIndex Worker] Search ${id} timed out after ${SEARCH_TIMEOUT_MS}ms`);
+          console.warn(
+            `[SearchIndex Worker] Search ${id} timed out after ${SEARCH_TIMEOUT_MS}ms`,
+          );
         }
         resolveAndCleanupSearch(id, []);
       }, SEARCH_TIMEOUT_MS);
@@ -676,7 +808,7 @@ export const searchMessagesAsync = (
 
 export const searchMessages = (
   query: string,
-  filterType: SearchFilterType = "content"
+  filterType: SearchFilterType = "content",
 ): SearchResult[] => {
   // Synchronous search: only works if main-thread index is built (legacy fallback)
   return messageSearchIndex.search(query, filterType);
@@ -718,7 +850,7 @@ export const linearSearchMessages = (
   messages: ClaudeMessage[],
   query: string,
   filterType: SearchFilterType = "content",
-  messageFilter?: MessageFilter
+  messageFilter?: MessageFilter,
 ): SearchResult[] => {
   if (!query.trim()) return [];
   const lowerQuery = query.toLowerCase();
@@ -730,9 +862,10 @@ export const linearSearchMessages = (
     const message = messages[i];
     if (!message) continue;
 
-    const text = filterType === "toolId"
-      ? extractToolIds(message)
-      : extractSearchableText(message, contentTypes);
+    const text =
+      filterType === "toolId"
+        ? extractToolIds(message)
+        : extractSearchableText(message, contentTypes);
 
     if (!text) continue;
     const lowerText = text.toLowerCase();
@@ -758,7 +891,9 @@ export const linearSearchMessages = (
   }
 
   // Sort newest-first to match FlexSearch result order for consistent navigation
-  results.sort((a, b) => b.messageIndex - a.messageIndex || b.matchIndex - a.matchIndex);
+  results.sort(
+    (a, b) => b.messageIndex - a.messageIndex || b.matchIndex - a.matchIndex,
+  );
 
   return results;
 };

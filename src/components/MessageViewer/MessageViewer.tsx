@@ -16,6 +16,7 @@ import { LoadingSpinner, LoadingState } from "@/components/ui/loading";
 import type { MessageViewerProps } from "./types";
 import { VirtualizedMessageRow } from "./components/VirtualizedMessageRow";
 import { FloatingDateOverlay } from "./components/FloatingDateOverlay";
+import { SessionMinimap, MINIMAP_WIDTH_PX } from "./components/SessionMinimap";
 import { CaptureModeToolbar } from "./components/CaptureModeToolbar";
 import { FilterToolbar } from "./components/FilterToolbar";
 import { OffScreenCaptureRenderer } from "./components/OffScreenCaptureRenderer";
@@ -23,6 +24,7 @@ import { ScreenshotPreviewModal } from "./components/ScreenshotPreviewModal";
 import { useSearchState } from "./hooks/useSearchState";
 import { useScrollNavigation } from "./hooks/useScrollNavigation";
 import { useMessageVirtualization } from "./hooks/useMessageVirtualization";
+import { usePromptJump } from "./hooks/usePromptJump";
 import { useCapturePreview } from "../../hooks/useCapturePreview";
 import { MAX_CAPTURE_MESSAGES } from "../../hooks/useCaptureScreenshot";
 import {
@@ -34,6 +36,7 @@ import {
   collectModelChangeUuids,
 } from "./helpers";
 import { useAppStore } from "../../store/useAppStore";
+import { useMinimapVisible } from "../../hooks/useMinimapVisible";
 import { useExpandRegistry } from "../../store/expandRegistryStore";
 import { useExport } from "../../hooks/useExport";
 import {
@@ -155,6 +158,7 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
     targetMessageUuid,
     shouldHighlightTarget,
     clearTargetMessage,
+    navigateToMessage,
     messageFilter,
     // SubAgent navigation
     subagentSessions,
@@ -165,6 +169,11 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
     isLoadingMessages,
     setActiveSessionNearBottom,
   } = useAppStore();
+
+  // Session minimap: combines the settings switch, Capture Mode, and the md
+  // breakpoint into one gate (see useMinimapVisible). Drives both whether the
+  // strip mounts and whether the list gets right-padded for it.
+  const isMinimapVisible = useMinimapVisible();
 
   const isInSubagent = parentSessionStack.length > 0;
   const hasParallelTasks = useMemo(
@@ -419,6 +428,15 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
     // height, so the height estimate must not collapse them to 0 (issue #334).
     isInSubagent: parentSessionStack.length > 0,
     scrollMargin: virtualScrollMargin,
+  });
+
+  // Alt+ArrowUp / Alt+ArrowDown jump between turn starts in the loaded rows.
+  usePromptJump({
+    flattenedMessages,
+    virtualizer,
+    getScrollElement,
+    targetMessageUuid,
+    navigateToMessage,
   });
 
   // Set of selected message UUIDs for O(1) lookup
@@ -821,6 +839,11 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
     );
   }
 
+  // One condition for the strip, the wrapper's padding, and the scroll buttons'
+  // offset: the list's own render guard plus the visibility gate (switch /
+  // Capture Mode / md breakpoint), so no gutter is reserved for an unmounted strip.
+  const showMinimapStrip = flattenedMessages.length > 0 && scrollElementReady && isMinimapVisible;
+
   return (
     <div className="relative flex-1 h-full flex flex-col">
       {/* Search Toolbar - Editorial aesthetic */}
@@ -829,8 +852,7 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
         className={cn(
           "flex items-center gap-2 lg:gap-3 px-3 lg:px-4 py-2 lg:py-2.5 border-b sticky top-0 z-10",
           "flex-wrap",
-          "bg-gradient-to-r from-zinc-900/95 via-zinc-800/95 to-zinc-900/95",
-          "backdrop-blur-sm border-zinc-700/50"
+          "bg-card/95 backdrop-blur-sm border-border"
         )}
       >
         {/* Back Button */}
@@ -840,8 +862,8 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
             onClick={onBack}
             className={cn(
               "shrink-0 p-2 rounded-lg transition-all duration-200",
-              "bg-zinc-800/60 hover:bg-zinc-700/80 text-zinc-400 hover:text-zinc-100",
-              "border border-zinc-700/40 hover:border-zinc-600/50"
+              "bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground",
+              "border border-border/60 hover:border-border"
             )}
             title={t("common.back")}
           >
@@ -850,15 +872,15 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
         )}
 
         {/* Filter Toggle - Segmented control style */}
-        <div className="shrink-0 flex items-center bg-zinc-800/60 rounded-lg p-0.5 border border-zinc-700/40 order-2 lg:order-none">
+        <div className="shrink-0 flex items-center bg-muted/60 rounded-lg p-0.5 border border-border/60 order-2 lg:order-none">
           <button
             type="button"
             onClick={() => onFilterTypeChange("content")}
             className={cn(
               "text-xs px-2.5 py-1 rounded-md transition-all duration-200 whitespace-nowrap",
               sessionSearch.filterType === "content"
-                ? "bg-zinc-600/80 text-zinc-100 shadow-sm"
-                : "text-zinc-400 hover:text-zinc-200"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
             )}
             title={t("messageViewer.filterType")}
           >
@@ -870,8 +892,8 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
             className={cn(
               "text-xs px-2.5 py-1 rounded-md transition-all duration-200 whitespace-nowrap",
               sessionSearch.filterType === "toolId"
-                ? "bg-zinc-600/80 text-zinc-100 shadow-sm"
-                : "text-zinc-400 hover:text-zinc-200"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
             )}
             title={t("messageViewer.filterType")}
           >
@@ -883,7 +905,7 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
         <div className="relative flex-1 group order-1 lg:order-none w-full lg:w-auto">
           <Search className={cn(
             "absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4",
-            "text-zinc-500 group-focus-within:text-zinc-300 transition-colors"
+            "text-muted-foreground group-focus-within:text-foreground transition-colors"
           )} />
           <input
             ref={searchInputRef}
@@ -895,9 +917,9 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
             aria-label={t("messageViewer.searchPlaceholder")}
             className={cn(
               "w-full pl-9 pr-9 py-2 rounded-lg text-sm",
-              "bg-zinc-800/50 border border-zinc-700/50",
-              "text-zinc-100 placeholder:text-zinc-500",
-              "focus:outline-none focus:ring-1 focus:ring-zinc-500/50 focus:border-zinc-500/70",
+              "bg-muted/50 border border-border/60",
+              "text-foreground placeholder:text-muted-foreground",
+              "focus:outline-none focus:ring-1 focus:ring-ring/50 focus:border-ring/70",
               "transition-all duration-200"
             )}
           />
@@ -913,8 +935,8 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
                 aria-label="Clear search"
                 className={cn(
                   "absolute right-2.5 top-1/2 transform -translate-y-1/2",
-                  "p-1 rounded-md text-zinc-500",
-                  "hover:bg-zinc-700/50 hover:text-zinc-300",
+                  "p-1 rounded-md text-muted-foreground",
+                  "hover:bg-muted hover:text-foreground",
                   "transition-all duration-150"
                 )}
               >
@@ -927,10 +949,10 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
         {/* Match Navigation - Enhanced touch targets */}
         {sessionSearch.query && sessionSearch.matches && sessionSearch.matches.length > 0 && (
           <div className="shrink-0 flex items-center gap-1.5 order-3 lg:order-none">
-            <span className="whitespace-nowrap text-xs font-mono tabular-nums text-zinc-300 bg-zinc-700/50 px-2 py-1 rounded-md border border-zinc-600/30">
+            <span className="whitespace-nowrap text-xs font-mono tabular-nums text-foreground bg-muted px-2 py-1 rounded-md border border-border/60">
               {sessionSearch.currentMatchIndex + 1}/{sessionSearch.matches.length}
             </span>
-            <div className="flex items-center gap-0.5 bg-zinc-800/60 rounded-lg p-0.5 border border-zinc-700/40">
+            <div className="flex items-center gap-0.5 bg-muted/60 rounded-lg p-0.5 border border-border/60">
               <button
                 type="button"
                 onClick={onPrevMatch}
@@ -939,7 +961,7 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
                 title="Shift+Enter"
                 className={cn(
                   "p-1.5 rounded-md transition-all duration-150",
-                  "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60",
+                  "text-muted-foreground hover:text-foreground hover:bg-muted",
                   "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 )}
               >
@@ -953,7 +975,7 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
                 title="Enter"
                 className={cn(
                   "p-1.5 rounded-md transition-all duration-150",
-                  "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60",
+                  "text-muted-foreground hover:text-foreground hover:bg-muted",
                   "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                 )}
               >
@@ -972,9 +994,9 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
               className={cn(
                 "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg whitespace-nowrap",
                 "transition-all duration-200",
-                "bg-zinc-700/60 hover:bg-zinc-600/70",
-                "text-zinc-300 hover:text-zinc-100",
-                "border border-zinc-600/50 hover:border-zinc-500/50",
+                "bg-muted/60 hover:bg-muted",
+                "text-foreground/80 hover:text-foreground",
+                "border border-border/60 hover:border-border",
                 "shadow-sm hover:shadow-md"
               )}
               title={t("captureMode.tooltip")}
@@ -992,9 +1014,9 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
                   className={cn(
                     "flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg whitespace-nowrap",
                     "transition-all duration-200",
-                    "bg-zinc-700/60 hover:bg-zinc-600/70",
-                    "text-zinc-300 hover:text-zinc-100",
-                    "border border-zinc-600/50 hover:border-zinc-500/50",
+                    "bg-muted/60 hover:bg-muted",
+                    "text-foreground/80 hover:text-foreground",
+                    "border border-border/60 hover:border-border",
                     "shadow-sm hover:shadow-md",
                     "disabled:opacity-50 disabled:cursor-not-allowed"
                   )}
@@ -1079,12 +1101,26 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
         />
       )}
 
-      <div className="relative flex-1 min-h-0">
+      <div
+        className="relative flex-1 min-h-0"
+        style={showMinimapStrip ? { paddingRight: MINIMAP_WIDTH_PX } : undefined}
+      >
         {/* Floating date overlay — outside scroll container to stay fixed */}
         {flattenedMessages.length > 0 && scrollElementReady && (
           <FloatingDateOverlay
             virtualRows={virtualRows}
             flattenedMessages={flattenedMessages}
+          />
+        )}
+
+        {/* Session minimap strip — see `showMinimapStrip`. */}
+        {showMinimapStrip && (
+          <SessionMinimap
+            virtualizer={virtualizer}
+            flattenedMessages={flattenedMessages}
+            virtualRows={virtualRows}
+            totalSize={totalSize}
+            getScrollElement={getScrollElement}
           />
         )}
 
@@ -1272,8 +1308,13 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
 
         </OverlayScrollbarsComponent>
 
-        {/* Floating scroll buttons — bottom-right of message area */}
-        <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-30">
+        {/* Floating scroll buttons — bottom-right of message area, kept left
+            of the minimap strip when it is shown. */}
+        <div
+          data-testid="message-scroll-buttons"
+          className="absolute bottom-4 right-4 flex flex-col gap-2 z-30"
+          style={showMinimapStrip ? { right: MINIMAP_WIDTH_PX + 16 } : undefined}
+        >
           {/* Scroll to top */}
           {showScrollToTop && (
             <button
@@ -1342,8 +1383,8 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
             "px-4 py-2.5 rounded-lg shadow-lg text-sm font-medium",
             "animate-in fade-in slide-in-from-bottom-2 duration-200",
             captureToast.type === "success"
-              ? "bg-emerald-600 text-white"
-              : "bg-red-600 text-white"
+              ? "bg-success text-success-foreground"
+              : "bg-destructive text-destructive-foreground"
           )}
         >
           {captureToast.message}

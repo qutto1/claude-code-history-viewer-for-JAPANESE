@@ -1,3 +1,4 @@
+use crate::commands::stats::session_files;
 use crate::models::{ClaudeProject, GitCommit};
 use crate::utils::{
     detect_git_worktree_info, estimate_message_count_from_size, extract_project_name,
@@ -126,9 +127,14 @@ pub async fn validate_custom_claude_dir(path: String) -> Result<bool, String> {
 /// configuration directory (has a `projects/` subfolder). Returns `None` otherwise.
 #[tauri::command]
 pub async fn detect_claude_config_dir() -> Result<Option<String>, String> {
+    Ok(claude_config_dir())
+}
+
+/// Synchronous body of [`detect_claude_config_dir`].
+pub(crate) fn claude_config_dir() -> Option<String> {
     let raw = match std::env::var("CLAUDE_CONFIG_DIR") {
         Ok(val) if !val.trim().is_empty() => val.trim().to_string(),
-        _ => return Ok(None),
+        _ => return None,
     };
 
     // Expand ~ to home directory (only exact "~" or "~/..." patterns)
@@ -148,13 +154,12 @@ pub async fn detect_claude_config_dir() -> Result<Option<String>, String> {
 
     let path = PathBuf::from(&expanded);
     if !path.is_absolute() {
-        return Ok(None);
+        return None;
     }
 
-    match crate::utils::validate_custom_claude_path(&path) {
-        Ok(_) => Ok(Some(expanded)),
-        Err(_) => Ok(None),
-    }
+    crate::utils::validate_custom_claude_path(&path)
+        .ok()
+        .map(|_| expanded)
 }
 
 /// Scan the Claude storage directory for projects.
@@ -177,10 +182,15 @@ pub async fn scan_projects(claude_path: String) -> Result<Vec<ClaudeProject>, St
 /// Infallible: an unreadable project directory is skipped rather than failing
 /// the scan. The command's `Result` is the IPC contract and stays; the
 /// `#[tauri::command]` attribute was hiding this from clippy.
-fn scan_projects_blocking(claude_path: String) -> Vec<ClaudeProject> {
+pub(crate) fn scan_projects_blocking(claude_path: String) -> Vec<ClaudeProject> {
     #[cfg(debug_assertions)]
     let start_time = std::time::Instant::now();
-    let projects_path = PathBuf::from(&claude_path).join("projects");
+    // Empty is the default root, never a path relative to the working
+    // directory (#693).
+    let Some(claude_base) = crate::providers::claude::base_path_or_default(&claude_path) else {
+        return vec![];
+    };
+    let projects_path = claude_base.join("projects");
 
     if !projects_path.exists() {
         return vec![];
@@ -228,24 +238,22 @@ fn scan_projects_blocking(claude_path: String) -> Vec<ClaudeProject> {
         let mut direct_sessions: Vec<(SystemTime, PathBuf)> = Vec::new();
         let mut nested_cwd_candidate: Option<(SystemTime, String)> = None;
 
-        for jsonl_entry in WalkDir::new(entry.path())
-            .into_iter()
-            .filter_map(std::result::Result::ok)
-            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("jsonl"))
-        {
+        // Regular files only, no symlink below the project followed
+        // (`session_files`): a linked session file would be counted and its
+        // `cwd` read from wherever it points, and a FIFO would block the scan.
+        for jsonl_path in session_files::regular_session_files(entry.path()) {
             // Only top-level jsonl are main sessions; sidechain/subagent jsonl
             // live in subdirectories (see utils::find_subagent_files). Counting
             // them here inflates the project tree's session count relative to
             // load_project_sessions, which filters them out via exclude_sidechain.
-            let is_direct_session = jsonl_entry
-                .path()
+            let is_direct_session = jsonl_path
                 .strip_prefix(entry.path())
                 .is_ok_and(|relative| relative.components().count() == 1);
             if is_direct_session {
                 session_count += 1;
             }
 
-            if let Ok(metadata) = jsonl_entry.metadata() {
+            if let Ok(metadata) = fs::metadata(&jsonl_path) {
                 let modified = metadata.modified().ok();
                 if let Some(modified) = modified {
                     if last_modified.is_none() || modified > last_modified.unwrap() {
@@ -265,7 +273,7 @@ fn scan_projects_blocking(claude_path: String) -> Vec<ClaudeProject> {
                 if is_direct_session {
                     direct_sessions.push((
                         modified.unwrap_or(SystemTime::UNIX_EPOCH),
-                        jsonl_entry.path().to_path_buf(),
+                        jsonl_path.clone(),
                     ));
                     continue;
                 }
@@ -276,7 +284,7 @@ fn scan_projects_blocking(claude_path: String) -> Vec<ClaudeProject> {
                     (Some(_), None) => false,
                 };
                 if should_check_cwd {
-                    if let Some(cwd) = extract_session_facts(jsonl_entry.path()).cwd {
+                    if let Some(cwd) = extract_session_facts(&jsonl_path).cwd {
                         nested_cwd_candidate =
                             Some((modified.unwrap_or(SystemTime::UNIX_EPOCH), cwd));
                     }

@@ -7,6 +7,7 @@
 
 import * as React from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   Collapsible,
   CollapsibleContent,
@@ -65,6 +66,10 @@ export function CustomDirectoriesSection({
   } = useAppStore();
 
   const customPaths = userMetadata?.settings?.customClaudePaths ?? [];
+  // The server treats these directories as its own configuration and ignores
+  // changes sent from the web UI, so the controls exist only on desktop.
+  const isServerManaged = !isTauri();
+  const canEdit = !readOnly && !isServerManaged;
 
   const [isAdding, setIsAdding] = React.useState(false);
   const [newPath, setNewPath] = React.useState("");
@@ -93,6 +98,7 @@ export function CustomDirectoriesSection({
       }
     } catch (err) {
       console.error("Folder selection failed:", err);
+      toast.error(t("settingsManager.errors.folderSelectFailed", { detail: String(err) }));
     }
   };
 
@@ -144,7 +150,7 @@ export function CustomDirectoriesSection({
       // Auto-rescan to remove projects from the deleted directory
       await useAppStore.getState().scanProjects();
     } catch (err) {
-      setAddError(String(err));
+      toast.error(t("settingsManager.errors.directoryScanFailed", { detail: String(err) }));
     }
   };
 
@@ -162,7 +168,7 @@ export function CustomDirectoriesSection({
       // Rescan to update ProjectTree badges
       await useAppStore.getState().scanProjects();
     } catch (err) {
-      setAddError(String(err));
+      toast.error(t("settingsManager.errors.directoryScanFailed", { detail: String(err) }));
     }
   };
 
@@ -193,6 +199,11 @@ export function CustomDirectoriesSection({
           <p className="text-xs text-muted-foreground">
             {t("settings.customDirectories.description")}
           </p>
+          {isServerManaged && (
+            <p className="text-xs text-muted-foreground">
+              {t("settings.customDirectories.serverManaged")}
+            </p>
+          )}
 
           {/* Default path */}
           {claudePath && (
@@ -259,7 +270,7 @@ export function CustomDirectoriesSection({
                   )
                 )}
               </div>
-              {!readOnly && editingPath !== cp.path && (
+              {canEdit && editingPath !== cp.path && (
                 <div className="flex shrink-0 gap-1">
                   <Button
                     variant="ghost"
@@ -296,7 +307,7 @@ export function CustomDirectoriesSection({
           )}
 
           {/* Add form */}
-          {!readOnly && isAdding ? (
+          {canEdit && isAdding ? (
             <div
               className={cn(
                 "space-y-2 rounded-md border border-border p-3",
@@ -373,7 +384,7 @@ export function CustomDirectoriesSection({
                 </Button>
               </div>
             </div>
-          ) : !readOnly ? (
+          ) : canEdit ? (
             <Button
               variant="outline"
               size="sm"

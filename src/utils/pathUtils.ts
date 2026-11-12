@@ -23,6 +23,54 @@ export function isProjectPathUnavailable(project: {
   return project?.path_status === "unavailable";
 }
 
+// OS scratch locations. Sessions started there (agent sandboxes, one-off
+// translation jobs, `mktemp -d` experiments) are rarely what the user is
+// looking for and would otherwise bury real projects in the explorer.
+const TEMP_PATH_PATTERNS: RegExp[] = [
+  /^\/(?:private\/)?tmp(?:\/|$)/,
+  /^\/(?:private\/)?var\/(?:folders|tmp)(?:\/|$)/,
+  /^\/dev\/shm(?:\/|$)/,
+  /^\/Users\/[^/]+\/Library\/Caches(?:\/|$)/,
+  /^\/home\/[^/]+\/\.cache(?:\/|$)/,
+  /^\/?[A-Za-z]:[\\/]Users[\\/][^\\/]+[\\/]AppData[\\/]Local[\\/]Temp(?:[\\/]|$)/i,
+  /^\/?[A-Za-z]:[\\/]Windows[\\/]Temp(?:[\\/]|$)/i,
+];
+
+/** Whether `path` lives under an OS temporary/cache directory. */
+export function isTemporaryPath(path: string | null | undefined): boolean {
+  if (!path) return false;
+  return TEMP_PATH_PATTERNS.some((pattern) => pattern.test(path));
+}
+
+/** Available project whose working directory is an OS scratch location. */
+export function isProjectTemporary(project: {
+  actual_path?: string;
+  path_status?: string;
+} | null | undefined): boolean {
+  return !isProjectPathUnavailable(project) && isTemporaryPath(project?.actual_path);
+}
+
+/**
+ * Human label for a project row. Providers that name projects after the
+ * encoded store directory (`-Users-jack-client-foo`) or an absolute path get
+ * the leaf of the real working directory instead.
+ */
+export function getProjectDisplayName(project: {
+  name: string;
+  path: string;
+  actual_path?: string;
+  provider?: string | null;
+}): string {
+  const actualPath = project.actual_path || project.path || project.name;
+  const preferPathLeaf =
+    (project.provider ?? "claude") === "claude" ||
+    project.name === project.path ||
+    project.name === actualPath ||
+    isAbsolutePath(project.name) ||
+    project.name.startsWith("-");
+  return preferPathLeaf ? getPathLeaf(actualPath) || project.name : project.name;
+}
+
 /**
  * Detect home directory from paths (infer from /Users/xxx, /home/xxx, or Windows Users paths)
  */

@@ -299,22 +299,23 @@ function App() {
   );
 
   // Local state
-  const [isViewingGlobalStats, setIsViewingGlobalStats] = useState(false);
+  const isViewingGlobalStats = useAppStore((s) => s.isViewingGlobalStats);
+  const setIsViewingGlobalStats = useAppStore((s) => s.setViewingGlobalStats);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // A selected session and the project-agnostic global-stats overview are
-  // mutually exclusive — entering global stats clears the project/session
-  // (clearProjectSelection). The sidebar resets this flag explicitly on
-  // session select, but the global search modal selects sessions via store
-  // actions and can't reach this local state, so it would otherwise stay in
-  // the global-stats view and hide the navigated conversation. Guarantee the
-  // exit here whenever a session becomes selected (issue #390).
+  // mutually exclusive with viewing a conversation. The sidebar resets this
+  // flag explicitly on session select, but the global search modal selects
+  // sessions via store actions and can't reach this handler, so guarantee the
+  // exit whenever a session becomes selected (issue #390).
+  // refreshAllConversations re-selects the session; that is not navigation,
+  // so it is ignored here and the refresh restores the flag itself.
   useEffect(() => {
-    if (selectedSession) {
+    if (selectedSession && !useAppStore.getState().isRefreshingAllConversations) {
       setIsViewingGlobalStats(false);
     }
-  }, [selectedSession]);
+  }, [selectedSession, setIsViewingGlobalStats]);
 
   // Sidebar resize
   const {
@@ -356,12 +357,14 @@ function App() {
     direction: "left",
   });
 
+  // Global stats is a view, not a navigation target: keep the current
+  // project/session selected so the sidebar and sessions column retain their
+  // context and one click returns to the conversation.
   const handleGlobalStatsClick = useCallback(() => {
     setIsViewingGlobalStats(true);
-    clearProjectSelection();
     setAnalyticsCurrentView("analytics");
     void loadGlobalStats();
-  }, [clearProjectSelection, loadGlobalStats, setAnalyticsCurrentView]);
+  }, [loadGlobalStats, setAnalyticsCurrentView, setIsViewingGlobalStats]);
 
   const handleToggleSidebar = useCallback(() => {
     setIsSidebarCollapsed((prev) => !prev);
@@ -443,7 +446,7 @@ function App() {
         toast.error(`${t("session.selectError")}: ${message}`);
       }
     },
-    [projects, selectProject, selectSession, setAnalyticsCurrentView, t]
+    [projects, selectProject, selectSession, setAnalyticsCurrentView, setIsViewingGlobalStats, t]
   );
 
   const handleTokenStatClick = useCallback(
@@ -499,7 +502,7 @@ function App() {
         console.error(`Failed to auto-load ${activeView} view:`, error);
       }
     },
-    [clearProjectSelection, selectProject, analyticsActions, setDateFilter]
+    [clearProjectSelection, selectProject, analyticsActions, setDateFilter, setIsViewingGlobalStats]
   );
 
   const handleSessionHover = useCallback(

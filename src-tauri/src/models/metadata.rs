@@ -232,7 +232,7 @@ pub struct WslSettings {
     pub excluded_distros: Vec<String>,
 }
 
-/// Periodic refresh of the selected session's messages
+/// Periodic run of the header's refresh button (rescan projects, re-select the open session)
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAutoRefreshSettings {
@@ -281,13 +281,17 @@ pub struct UserSettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wsl: Option<WslSettings>,
 
-    /// Periodic refresh of the selected session's messages
+    /// Periodic run of the header's refresh button (rescan projects, re-select the open session)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_auto_refresh: Option<SessionAutoRefreshSettings>,
 
     /// Providers explicitly discovered by the user and allowed to scan on startup
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub discovered_provider_ids: Vec<String>,
+
+    /// Custom CLI arguments per provider for session resumption
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub resume_cli_args: std::collections::HashMap<String, String>,
 }
 
 #[cfg(test)]

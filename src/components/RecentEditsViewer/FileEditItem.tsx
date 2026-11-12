@@ -67,6 +67,7 @@ export const FileEditItem: React.FC<FileEditItemProps> = ({
     canReveal,
     revealLabel,
     reveal,
+    canRestore,
     restoreStatus,
     restoreError,
     isConfirmingRestore,
@@ -74,6 +75,13 @@ export const FileEditItem: React.FC<FileEditItemProps> = ({
     confirmRestore,
     cancelRestore,
   } = useFileEditActions(edit, { onRestored, restoreScope });
+
+  // A row that is not a whole file keeps its Restore button, aria-disabled but
+  // still focusable, so the tooltip and screen readers can say why instead of
+  // the action silently vanishing.
+  const restoreLabel = canRestore
+    ? t("recentEdits.restoreFile")
+    : t("recentEdits.restoreUnavailable");
 
   const language = getLanguageFromPath(edit.file_path);
   const fileName = getPathLeaf(edit.file_path);
@@ -127,8 +135,8 @@ export const FileEditItem: React.FC<FileEditItemProps> = ({
           "relative flex flex-wrap items-center justify-between gap-y-2 cursor-pointer transition-all duration-300",
           dense ? "p-2" : "p-4",
           edit.operation_type === "write"
-            ? "bg-gradient-to-r from-green-50 to-emerald-50/50 dark:from-green-950/40 dark:to-emerald-950/20"
-            : "bg-gradient-to-r from-blue-50 to-indigo-50/50 dark:from-blue-950/40 dark:to-indigo-950/20",
+            ? "bg-gradient-to-r from-success/10 to-success/5"
+            : "bg-gradient-to-r from-info/10 to-info/5",
           isExpanded && "border-b border-border"
         )}
         onClick={() => toggleView("content")}
@@ -263,10 +271,10 @@ export const FileEditItem: React.FC<FileEditItemProps> = ({
                   toggleView("added");
                 }}
                 className={cn(
-                  "text-green-600 dark:text-green-400 bg-green-100 dark:bg-green-900/50 px-1.5 py-0.5 rounded transition-all",
+                  "text-success bg-success/15 px-1.5 py-0.5 rounded transition-all",
                   isExpanded && viewMode === "added"
-                    ? "ring-2 ring-green-500/70"
-                    : "hover:ring-1 hover:ring-green-500/50"
+                    ? "ring-2 ring-success/70"
+                    : "hover:ring-1 hover:ring-success/50"
                 )}
                 title={t("recentEdits.showAddedLines")}
                 aria-label={t("recentEdits.showAddedLines")}
@@ -282,10 +290,10 @@ export const FileEditItem: React.FC<FileEditItemProps> = ({
                   toggleView("removed");
                 }}
                 className={cn(
-                  "text-red-600 dark:text-red-400 bg-red-100 dark:bg-red-900/50 px-1.5 py-0.5 rounded transition-all",
+                  "text-destructive bg-destructive/15 px-1.5 py-0.5 rounded transition-all",
                   isExpanded && viewMode === "removed"
-                    ? "ring-2 ring-red-500/70"
-                    : "hover:ring-1 hover:ring-red-500/50"
+                    ? "ring-2 ring-destructive/70"
+                    : "hover:ring-1 hover:ring-destructive/50"
                 )}
                 title={t("recentEdits.showRemovedLines")}
                 aria-label={t("recentEdits.showRemovedLines")}
@@ -378,22 +386,31 @@ export const FileEditItem: React.FC<FileEditItemProps> = ({
           <button
             onClick={(e) => {
               e.stopPropagation();
+              if (!canRestore) return;
               if (restoreStatus === "idle") {
                 requestRestore();
               }
             }}
-            disabled={restoreStatus === "loading"}
+            // `aria-disabled` rather than `disabled` when unavailable: a natively
+            // disabled button leaves the tab order, hiding the reason from
+            // keyboard and screen-reader users. Only the in-flight restore is
+            // natively disabled.
+            aria-disabled={!canRestore || undefined}
+            disabled={canRestore && restoreStatus === "loading"}
             className={cn(
               "p-2 rounded-lg transition-all duration-200",
-              restoreStatus === "success"
-                ? "bg-success/20 text-success ring-1 ring-success/30"
-                : restoreStatus === "error"
-                  ? "bg-destructive/20 text-destructive ring-1 ring-destructive/30"
-                  : restoreStatus === "loading"
-                    ? "bg-muted text-muted-foreground cursor-wait"
-                    : "hover:bg-muted text-muted-foreground hover:text-foreground"
+              !canRestore
+                ? "text-muted-foreground/40 cursor-not-allowed"
+                : restoreStatus === "success"
+                  ? "bg-success/20 text-success ring-1 ring-success/30"
+                  : restoreStatus === "error"
+                    ? "bg-destructive/20 text-destructive ring-1 ring-destructive/30"
+                    : restoreStatus === "loading"
+                      ? "bg-muted text-muted-foreground cursor-wait"
+                      : "hover:bg-muted text-muted-foreground hover:text-foreground"
             )}
-            title={t("recentEdits.restoreFile")}
+            title={restoreLabel}
+            aria-label={restoreLabel}
           >
             {restoreStatus === "loading" ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -409,7 +426,7 @@ export const FileEditItem: React.FC<FileEditItemProps> = ({
       {/* Error message toast */}
       {restoreError && (
         <div
-          className={`mx-3 mb-2 p-2 rounded-md bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 ${layout.smallText}`}
+          className={`mx-3 mb-2 p-2 rounded-md bg-destructive/10 text-destructive ${layout.smallText}`}
         >
           {t("recentEdits.restoreError")}: {restoreError}
         </div>
@@ -442,6 +459,7 @@ export const FileEditItem: React.FC<FileEditItemProps> = ({
                 filePath={edit.file_path}
                 restoreContent={edit.content_after_change}
                 existsOnDisk={edit.exists_on_disk}
+                restoreScope={restoreScope}
               />
             </div>
 
@@ -454,7 +472,7 @@ export const FileEditItem: React.FC<FileEditItemProps> = ({
               </button>
               <button
                 onClick={confirmRestore}
-                className={`px-4 py-2 rounded-md ${layout.bodyText} bg-blue-600 hover:bg-blue-700 text-white`}
+                className={`px-4 py-2 rounded-md ${layout.bodyText} bg-accent hover:bg-accent/90 text-accent-foreground`}
               >
                 {t("recentEdits.confirmRestore")}
               </button>

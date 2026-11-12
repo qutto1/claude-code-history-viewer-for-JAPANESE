@@ -86,10 +86,14 @@ export const createSettingsSlice: StateCreator<
 
   setExcludeSidechain: (exclude: boolean) => {
     set({ excludeSidechain: exclude });
-    // Refresh current project and session when filter changes
+    // Refresh current project and session when filter changes.
+    // `reloadProjectSessions`, not `selectProject`: the latter nulls
+    // `selectedSession`, which turns the `selectSession` below into a fresh
+    // load instead of an in-place reload — wiping the subagent stack,
+    // pagination and search index.
     const { selectedProject, selectedSession } = get();
     if (selectedProject) {
-      get().selectProject(selectedProject);
+      get().reloadProjectSessions(selectedProject);
     }
     if (selectedSession) {
       get().selectSession(selectedSession);

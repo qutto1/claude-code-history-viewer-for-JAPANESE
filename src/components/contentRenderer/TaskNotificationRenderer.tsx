@@ -22,17 +22,16 @@ import { REMARK_PLUGINS, REHYPE_PLUGINS } from "@/lib/markdownPlugins";
 import { cn } from "@/lib/utils";
 import { layout, getVariantStyles } from "@/components/renderers";
 import { useCaptureExpandState } from "@/contexts/CaptureExpandContext";
+import {
+  isFailedTaskStatus,
+  isTaskNotification,
+  parseTaskNotifications,
+  type TaskNotification,
+} from "@/components/MessageViewer/helpers/messageKinds";
 
 type Props = {
   text: string;
 };
-
-interface TaskNotification {
-  taskId?: string;
-  status?: "completed" | "running" | "failed" | string;
-  summary?: string;
-  result?: string;
-}
 
 const STATUS_CONFIG = {
   completed: {
@@ -59,6 +58,15 @@ const STATUS_CONFIG = {
   },
 } as const;
 
+type StatusKey = keyof typeof STATUS_CONFIG;
+
+// A missing or unknown status reads as completed; every non-successful
+// terminal status (failed, killed, stopped, ...) reads as failed.
+const getStatusKey = (status: string | undefined): StatusKey => {
+  if (isFailedTaskStatus(status)) return "failed";
+  return status === "running" ? "running" : "completed";
+};
+
 // Truncate task ID for display
 const formatTaskId = (id: string | undefined): string => {
   if (!id) return "---";
@@ -82,8 +90,7 @@ const TaskRow = memo(function TaskRow({
     () => setIsExpanded((prev) => !prev),
     [setIsExpanded],
   );
-  const statusKey = (notification.status || "completed") as keyof typeof STATUS_CONFIG;
-  const config = STATUS_CONFIG[statusKey] || STATUS_CONFIG.completed;
+  const config = STATUS_CONFIG[getStatusKey(notification.status)];
   const hasExpandableContent = notification.result || notification.summary;
   const Icon = config.icon;
 
@@ -230,37 +237,13 @@ export const TaskNotificationRenderer = memo(function TaskNotificationRenderer({
   const styles = getVariantStyles("task");
 
   // Parse notifications
-  const notifications = useMemo(() => {
-    const taskNotificationRegex = /<task-notification>([\s\S]*?)<\/task-notification>/g;
-    const matches = [...text.matchAll(taskNotificationRegex)];
-
-    return matches.map((match) => {
-      const content = match[1] || "";
-
-      const extractTag = (tagName: string): string | undefined => {
-        const regex = new RegExp(`<${tagName}>([\\s\\S]*?)<\\/${tagName}>`, "g");
-        const tagMatch = content?.match(regex);
-        return tagMatch?.[0]
-          ?.replace(new RegExp(`</?${tagName}>`, "g"), "")
-          .trim();
-      };
-
-      return {
-        taskId: extractTag("task-id"),
-        status: extractTag("status"),
-        summary: extractTag("summary"),
-        result: extractTag("result"),
-      };
-    });
-  }, [text]);
+  const notifications = useMemo(() => parseTaskNotifications(text), [text]);
 
   // Count by status
   const statusCounts = useMemo(() => {
     const counts = { completed: 0, running: 0, failed: 0 };
     notifications.forEach(n => {
-      const status = (n.status || "completed") as keyof typeof counts;
-      if (status in counts) counts[status]++;
-      else counts.completed++;
+      counts[getStatusKey(n.status)]++;
     });
     return counts;
   }, [notifications]);
@@ -477,6 +460,4 @@ export const TaskNotificationRenderer = memo(function TaskNotificationRenderer({
 /**
  * Check if text contains task-notification tags
  */
-export const hasTaskNotification = (text: string): boolean => {
-  return /<task-notification>[\s\S]*?<\/task-notification>/.test(text);
-};
+export const hasTaskNotification = (text: string): boolean => isTaskNotification(text);

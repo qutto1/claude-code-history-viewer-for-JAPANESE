@@ -1,7 +1,19 @@
 import React, { useCallback } from "react";
-import { Wrench } from "lucide-react";
+import {
+  BookOpen,
+  Bot,
+  Info,
+  ScrollText,
+  SquareSlash,
+  User,
+  Wrench,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { isFailedTaskStatus, type MessageKind } from "../MessageViewer/helpers/messageKinds";
+import { getKindLabelKey } from "./kindLabels";
 import type { NavigatorEntryData } from "./types";
 
 interface NavigatorEntryProps {
@@ -15,12 +27,24 @@ interface NavigatorEntryProps {
   style?: React.CSSProperties;
 }
 
-const ROLE_STYLES = {
-  user: { dot: "bg-blue-500" },
-  assistant: { dot: "bg-amber-500" },
-  system: { dot: "bg-gray-400" },
-  summary: { dot: "bg-purple-400" },
-} as const;
+interface KindStyle {
+  icon: LucideIcon;
+  /** Icon color */
+  iconClass: string;
+  /** Preview text weight; typed prompts read strongest, injected rows weakest */
+  textClass: string;
+}
+
+const KIND_STYLES: Record<MessageKind, KindStyle> = {
+  prompt: { icon: User, iconClass: "text-info", textClass: "text-foreground font-medium" },
+  command: { icon: SquareSlash, iconClass: "text-info", textClass: "text-foreground/80 font-mono" },
+  "agent-update": { icon: Zap, iconClass: "text-tool-task", textClass: "text-foreground/80" },
+  context: { icon: BookOpen, iconClass: "text-muted-foreground", textClass: "text-muted-foreground italic" },
+  reply: { icon: Bot, iconClass: "text-warning", textClass: "text-foreground/80" },
+  tool: { icon: Wrench, iconClass: "text-muted-foreground", textClass: "text-muted-foreground" },
+  system: { icon: Info, iconClass: "text-muted-foreground", textClass: "text-muted-foreground" },
+  summary: { icon: ScrollText, iconClass: "text-tool-mcp", textClass: "text-foreground/80" },
+};
 
 export const NavigatorEntry = React.memo<NavigatorEntryProps>(({
   entry,
@@ -35,8 +59,10 @@ export const NavigatorEntry = React.memo<NavigatorEntryProps>(({
   const { t } = useTranslation();
   const handleClick = useCallback(() => onClick(entry.uuid), [onClick, entry.uuid]);
 
-  const roleStyle = ROLE_STYLES[entry.role] || ROLE_STYLES.system;
-  const roleLabel = t(`navigator.role.${entry.role}`, { defaultValue: entry.role });
+  const kindStyle = KIND_STYLES[entry.kind] ?? KIND_STYLES.system;
+  const KindIcon = kindStyle.icon;
+  const kindLabel = t(getKindLabelKey(entry.kind));
+  const isFailed = isFailedTaskStatus(entry.status);
 
   const formattedTime = entry.timestamp
     ? new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
@@ -63,27 +89,37 @@ export const NavigatorEntry = React.memo<NavigatorEntryProps>(({
       aria-selected={isActive}
       aria-current={isActive ? "true" : undefined}
       aria-label={t("navigator.a11y.entryLabel", {
-        role: roleLabel,
+        role: kindLabel,
         turnIndex: entry.turnIndex,
-        defaultValue: `${roleLabel} message ${entry.turnIndex}`,
+        defaultValue: `${kindLabel} message ${entry.turnIndex}`,
       })}
     >
-      {/* Header row: role dot + turn label + time + tool icon */}
+      {/* Header row: kind icon + turn label + tool icon + time */}
       <div className="flex items-center gap-1.5 mb-0.5">
-        <span className={cn("w-2 h-2 rounded-full shrink-0", roleStyle.dot)} />
+        <span title={kindLabel} className="shrink-0 inline-flex">
+          <KindIcon
+            className={cn("w-3 h-3", isFailed ? "text-destructive" : kindStyle.iconClass)}
+            aria-hidden="true"
+          />
+        </span>
         <span className="text-2xs font-medium text-muted-foreground">
           #{entry.turnIndex}
         </span>
-        {entry.hasToolUse && (
-          <Wrench className="w-2.5 h-2.5 text-muted-foreground/60" />
+        {entry.hasToolUse && entry.kind !== "tool" && (
+          <Wrench className="w-2.5 h-2.5 text-muted-foreground/60" aria-hidden="true" />
         )}
         <span className="ml-auto text-2xs text-muted-foreground/60">
           {formattedTime}
         </span>
       </div>
-      {/* Preview text */}
-      <p className="text-xs text-foreground/80 line-clamp-2 leading-relaxed">
-        {entry.preview}
+      {/* Preview text; rows without text show their kind instead */}
+      <p
+        className={cn(
+          "text-xs line-clamp-2 leading-relaxed",
+          entry.preview ? kindStyle.textClass : "text-muted-foreground italic"
+        )}
+      >
+        {entry.preview || kindLabel}
       </p>
     </button>
   );

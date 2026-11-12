@@ -7,6 +7,8 @@ import type { Boundary } from "../../utils/contextMenu";
 export interface ContextMenuState {
   project: ClaudeProject;
   position: { x: number; y: number; boundary?: Boundary | null };
+  /** Other providers' projects for the same folder (merged row). */
+  providerSiblings?: ClaudeProject[];
 }
 
 export interface ProjectTreeProps {
@@ -24,6 +26,11 @@ export interface ProjectTreeProps {
   isLoading: boolean;
   isLoadingMoreSessions?: boolean;
   isViewingGlobalStats: boolean;
+  /**
+   * Render the selected project's sessions inline under its row. Off when the
+   * layout shows them in a dedicated SessionsPane column.
+   */
+  inlineSessions?: boolean;
   width?: number;
   isResizing?: boolean;
   onResizeStart?: (e: React.MouseEvent<HTMLElement>) => void;
@@ -64,6 +71,14 @@ export interface ProjectItemProps {
   onContextMenu: (e: React.MouseEvent) => void;
   variant?: "default" | "main" | "worktree";
   showProviderBadge?: boolean;
+  /**
+   * Same working directory recorded by other providers. Rendered as chips
+   * next to this row's own provider so one folder is one row.
+   */
+  providerSiblings?: ClaudeProject[];
+  onSelectSibling?: (project: ClaudeProject) => void;
+  /** False when sessions render in the SessionsPane rather than under the row. */
+  hasInlineChildren?: boolean;
 }
 
 export interface SessionListProps {
@@ -77,7 +92,10 @@ export interface SessionListProps {
   onSessionHover?: (session: ClaudeSession) => void;
   onLoadMoreSessions?: () => void;
   formatTimeAgo: (date: string) => string;
-  variant?: "default" | "main" | "worktree";
+  /** `pane`: standalone column (no tree indentation, virtual list fills `listHeight`). */
+  variant?: "default" | "main" | "worktree" | "pane";
+  /** Available height for the virtual list when `variant="pane"`. */
+  listHeight?: number;
   /**
    * Path of the project this list belongs to. Several lists can be on screen
    * at once, so multi-select — which can delete sessions — is confined to the
@@ -94,5 +112,5 @@ export interface GroupHeaderProps {
   isExpanded: boolean;
   ariaLevel?: number;
   onToggle: () => void;
-  variant: "directory" | "worktree" | "unavailable";
+  variant: "directory" | "worktree" | "unavailable" | "temporary";
 }

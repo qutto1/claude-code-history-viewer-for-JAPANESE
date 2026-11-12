@@ -85,7 +85,7 @@ export const OffScreenCaptureRenderer = forwardRef<
             'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
         }}
       >
-        {messagesToRender.map((item) => (
+        {messagesToRender.map((item, index) => (
           <ClaudeMessageNode
             key={item.message.uuid}
             message={item.message}
@@ -99,6 +99,9 @@ export const OffScreenCaptureRenderer = forwardRef<
             isTaskOperationGroupMember={false}
             isCaptureMode={false}
             isModelChanged={modelChangedUuids.has(item.message.uuid)}
+            // Mirror the on-screen header collapsing, but the first captured
+            // row always keeps its header so the image is self-describing.
+            hideHeader={index > 0 && item.isContinuation}
           />
         ))}
       </div>
@@ -116,8 +119,8 @@ export const OffScreenCaptureRenderer = forwardRef<
         }}
       >
         <div className="flex flex-col items-center gap-3">
-          <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
-          <span className="text-sm text-zinc-300">
+          <Loader2 className="w-8 h-8 text-accent animate-spin" />
+          <span className="text-sm text-white/80">
             {t("captureMode.capturing")}
           </span>
         </div>

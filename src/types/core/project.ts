@@ -131,10 +131,12 @@ export interface UserSettings {
   customClaudePaths?: CustomClaudePath[];
   /** WSL integration settings (Windows only) */
   wsl?: WslSettings;
-  /** Periodic refresh of the selected session's messages */
+  /** Periodic run of the header's refresh button (rescan projects, re-select the open session) */
   sessionAutoRefresh?: SessionAutoRefreshSettings;
   /** Providers explicitly discovered by the user and allowed to scan on startup */
   discoveredProviderIds?: ProviderId[];
+  /** Custom extra CLI arguments per provider for session resumption (e.g. claude: "--dangerously-skip-permissions") */
+  resumeCliArgs?: Record<string, string>;
 }
 
 // ============================================================================

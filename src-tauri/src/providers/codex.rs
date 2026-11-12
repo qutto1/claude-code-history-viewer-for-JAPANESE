@@ -7,6 +7,7 @@ use crate::utils::{
 use chrono::{DateTime, Utc};
 use memchr::{memchr2_iter, memchr_iter, memmem};
 use memmap2::Mmap;
+use rayon::prelude::*;
 use rusqlite::{Connection, OpenFlags};
 use serde_json::Value;
 use std::cmp::Ordering;
@@ -313,53 +314,56 @@ pub fn load_sessions(
         .strip_prefix("codex://")
         .unwrap_or(project_path);
 
-    let mut sessions = Vec::new();
+    let rollout_paths: Vec<PathBuf> = session_dirs
+        .iter()
+        .flat_map(|session_dir| {
+            WalkDir::new(session_dir)
+                .min_depth(1)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|e| e.file_type().is_file())
+                .filter(|e| is_discoverable_rollout(e.path()))
+                .map(walkdir::DirEntry::into_path)
+        })
+        .collect();
 
-    for session_dir in session_dirs {
-        for entry in WalkDir::new(session_dir)
-            .min_depth(1)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|e| e.file_type().is_file())
-            .filter(|e| is_discoverable_rollout(e.path()))
-        {
-            let rollout_path = entry.path();
-
+    let mut sessions: Vec<ClaudeSession> = rollout_paths
+        .par_iter()
+        .filter_map(|rollout_path| {
             match extract_session_cwd(rollout_path) {
-                Ok(Some(session_cwd)) if session_cwd != target_cwd => continue,
+                Ok(Some(session_cwd)) if session_cwd != target_cwd => return None,
                 Ok(_) | Err(_) => {}
             }
 
-            if let Ok(info) = extract_session_info(rollout_path) {
-                let native_title = title_index.get(&info.session_id);
-                let session_cwd = info.cwd.as_deref().unwrap_or("unknown");
-                if session_cwd != target_cwd {
-                    continue;
-                }
-
-                sessions.push(ClaudeSession {
-                    session_id: info.file_path.clone(),
-                    actual_session_id: info.session_id,
-                    file_path: info.file_path,
-                    project_name: Path::new(target_cwd)
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default(),
-                    message_count: info.message_count,
-                    first_message_time: info.first_message_time,
-                    last_message_time: info.last_message_time,
-                    last_modified: info.last_modified,
-                    has_tool_use: info.has_tool_use,
-                    has_errors: false,
-                    summary: native_title.cloned().or(info.summary),
-                    is_renamed: native_title.is_some(),
-                    provider: Some("codex".to_string()),
-                    storage_type: None,
-                    entrypoint: None,
-                });
+            let info = extract_session_info(rollout_path).ok()?;
+            let native_title = title_index.get(&info.session_id);
+            let session_cwd = info.cwd.as_deref().unwrap_or("unknown");
+            if session_cwd != target_cwd {
+                return None;
             }
-        }
-    }
+
+            Some(ClaudeSession {
+                session_id: info.file_path.clone(),
+                actual_session_id: info.session_id,
+                file_path: info.file_path,
+                project_name: Path::new(target_cwd)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                message_count: info.message_count,
+                first_message_time: info.first_message_time,
+                last_message_time: info.last_message_time,
+                last_modified: info.last_modified,
+                has_tool_use: info.has_tool_use,
+                has_errors: false,
+                summary: native_title.cloned().or(info.summary),
+                is_renamed: native_title.is_some(),
+                provider: Some("codex".to_string()),
+                storage_type: None,
+                entrypoint: None,
+            })
+        })
+        .collect();
 
     sessions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
     Ok(sessions)
@@ -1483,16 +1487,14 @@ fn convert_codex_item(
             ))
         }
         "reasoning" => {
-            let thinking_text = item
-                .get("summary")
-                .and_then(|s| s.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.get("text").and_then(|t| t.as_str()))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
-                .unwrap_or_default();
+            // Prefer the summary; some backends (e.g. DeepSeek via Codex, #597)
+            // leave it empty and store the text as `content[].reasoning_text`.
+            let mut thinking_text = join_reasoning_texts(item.get("summary"), |_| true);
+            if thinking_text.is_empty() {
+                thinking_text = join_reasoning_texts(item.get("content"), |v| {
+                    v.get("type").and_then(Value::as_str) == Some("reasoning_text")
+                });
+            }
 
             if thinking_text.is_empty() {
                 return None;
@@ -1515,6 +1517,19 @@ fn convert_codex_item(
         }
         _ => None,
     }
+}
+
+/// Joins the `text` of matching entries in a reasoning `summary`/`content` array.
+fn join_reasoning_texts(arr: Option<&Value>, keep: impl Fn(&Value) -> bool) -> String {
+    arr.and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter(|v| keep(v))
+                .filter_map(|v| v.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default()
 }
 
 fn convert_codex_event(
@@ -2145,6 +2160,49 @@ mod tests {
                 .and_then(Value::as_str),
             Some("data:image/png;base64,abc")
         );
+    }
+
+    fn reasoning_thinking_text(item: &Value) -> Option<String> {
+        let mut counter = 0u64;
+        let msg = convert_codex_item(
+            item,
+            "session-1",
+            None,
+            "2026-09-21T10:34:53Z",
+            &mut counter,
+        )?;
+        assert_eq!(msg.message_type, "assistant");
+        let arr = msg.content.as_ref().and_then(Value::as_array)?;
+        assert_eq!(arr[0].get("type").and_then(Value::as_str), Some("thinking"));
+        arr[0]
+            .get("thinking")
+            .and_then(Value::as_str)
+            .map(String::from)
+    }
+
+    #[test]
+    fn convert_reasoning_item_falls_back_to_content_reasoning_text() {
+        // DeepSeek via Codex leaves `summary` empty and stores the text in
+        // `content[]` as `reasoning_text` entries (#597).
+        let text = reasoning_thinking_text(&json!({
+            "type": "reasoning",
+            "summary": [],
+            "content": [{ "type": "reasoning_text", "text": "Let me generate it." }],
+            "encrypted_content": "opaque"
+        }));
+
+        assert_eq!(text.as_deref(), Some("Let me generate it."));
+    }
+
+    #[test]
+    fn convert_reasoning_item_prefers_summary_over_content() {
+        let text = reasoning_thinking_text(&json!({
+            "type": "reasoning",
+            "summary": [{ "type": "summary_text", "text": "Summary" }],
+            "content": [{ "type": "reasoning_text", "text": "Raw" }]
+        }));
+
+        assert_eq!(text.as_deref(), Some("Summary"));
     }
 
     #[test]
@@ -3502,7 +3560,7 @@ mod tests {
 
         assert_eq!(info.cwd.as_deref(), Some("/tmp/proj"));
         assert!(info.message_count > 0);
-        assert!(!info.last_modified.is_empty());
+        assert_ne!(info.last_modified, "");
     }
 
     #[test]

@@ -96,7 +96,13 @@ export interface MessagePayload {
   // Optional fields for assistant messages
   id?: string;
   model?: string;
-  stop_reason?: "tool_use" | "end_turn" | "max_tokens" | "stop_sequence" | "pause_turn" | "refusal";
+  stop_reason?:
+    | "tool_use"
+    | "end_turn"
+    | "max_tokens"
+    | "stop_sequence"
+    | "pause_turn"
+    | "refusal";
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -123,13 +129,13 @@ export interface RawClaudeMessage {
   sessionId: string;
   timestamp: string;
   type:
-  | "user"
-  | "assistant"
-  | "system"
-  | "summary"
-  | "file-history-snapshot"
-  | "progress"
-  | "queue-operation";
+    | "user"
+    | "assistant"
+    | "system"
+    | "summary"
+    | "file-history-snapshot"
+    | "progress"
+    | "queue-operation";
   /** Message payload - optional for progress, queue-operation, file-history-snapshot types */
   message?: MessagePayload;
   toolUse?: Record<string, unknown>;
@@ -160,6 +166,21 @@ export interface RawClaudeMessage {
 
 /** Provider-neutral categories derived from normalized session messages. */
 export type MessageCategory = "parallel-task";
+
+/** Metadata emitted for compaction and microcompaction boundaries. */
+export interface CompactMetadata {
+  trigger?: string;
+  preTokens?: number;
+  postTokens?: number;
+  warning?: string;
+  /**
+   * The backend forwards the record verbatim, so the fields below may also
+   * be present on Claude Code's boundary records.
+   */
+  durationMs?: number;
+  cumulativeDroppedTokens?: number;
+  preservedMessages?: { uuids?: string[]; allUuids?: string[] };
+}
 
 export interface BaseClaudeMessage {
   uuid: string;
@@ -205,7 +226,13 @@ export interface ClaudeAssistantMessage extends BaseClaudeMessage {
    * providers.
    */
   effort?: string;
-  stop_reason?: "tool_use" | "end_turn" | "max_tokens" | "stop_sequence" | "pause_turn" | "refusal";
+  stop_reason?:
+    | "tool_use"
+    | "end_turn"
+    | "max_tokens"
+    | "stop_sequence"
+    | "pause_turn"
+    | "refusal";
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -243,22 +270,15 @@ export interface ClaudeSystemMessage extends BaseClaudeMessage {
   durationMs?: number;
 
   // boundary fields
-  compactMetadata?: CompactBoundaryMetadata;
-  microcompactMetadata?: CompactBoundaryMetadata;
+  compactMetadata?: CompactMetadata;
+  microcompactMetadata?: CompactMetadata;
 }
 
 /**
  * Payload of a `compact_boundary` / `microcompact_boundary` system record.
- * The backend forwards it verbatim, so more fields than these may be present.
+ * Kept as an alias of {@link CompactMetadata} for existing callers.
  */
-export interface CompactBoundaryMetadata {
-  trigger?: string;
-  preTokens?: number;
-  postTokens?: number;
-  durationMs?: number;
-  cumulativeDroppedTokens?: number;
-  preservedMessages?: { uuids?: string[]; allUuids?: string[] };
-}
+export type CompactBoundaryMetadata = CompactMetadata;
 
 /** High level session summary */
 export interface ClaudeSummaryMessage extends BaseClaudeMessage {

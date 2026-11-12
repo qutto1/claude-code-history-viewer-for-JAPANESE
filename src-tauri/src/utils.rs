@@ -51,6 +51,23 @@ pub(crate) fn home_dir() -> Option<PathBuf> {
     }
 }
 
+/// The platform config directory (`~/Library/Application Support`,
+/// `$XDG_CONFIG_HOME` or `~/.config`, `%APPDATA%`).
+#[cfg(not(test))]
+pub(crate) fn config_dir() -> Option<PathBuf> {
+    dirs::config_dir()
+}
+
+/// Test build: derived from the sandboxed home, for the same reason as
+/// [`home_dir`]. `dirs::config_dir()` does not follow `HOME` on Windows and
+/// prefers `XDG_CONFIG_HOME` on Linux, so a test using it would resolve the
+/// runner's real config directory.
+#[cfg(test)]
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn config_dir() -> Option<PathBuf> {
+    home_dir().map(|home| home.join(".config"))
+}
+
 /// Estimated average bytes per JSONL line (used for capacity pre-allocation)
 /// Based on typical Claude message sizes (800-1200 bytes average)
 const ESTIMATED_BYTES_PER_LINE: usize = 500;
@@ -552,6 +569,20 @@ pub fn detect_git_worktree_info(project_path: &str) -> Option<GitInfo> {
     })
 }
 
+/// Remove the extended-length prefix that Windows may add to canonical paths.
+/// Keep this cross-platform so the representation rule can be unit-tested on
+/// Unix hosts as well.
+pub(crate) fn strip_windows_extended_prefix(path: &std::path::Path) -> PathBuf {
+    let raw = path.to_string_lossy();
+    if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        return PathBuf::from(rest);
+    }
+    path.to_path_buf()
+}
+
 /// Check if a path is a symlink (without following it)
 pub fn is_symlink(path: &std::path::Path) -> bool {
     std::fs::symlink_metadata(path)
@@ -780,8 +811,25 @@ mod tests {
 
     #[test]
     fn test_par_map_bounded_handles_empty_and_single() {
-        assert!(par_map_bounded(Vec::<u8>::new(), |i| i).is_empty());
+        assert_eq!(par_map_bounded(Vec::<u8>::new(), |i| i), Vec::<u8>::new());
         assert_eq!(par_map_bounded(vec![7u8], |i| i + 1), vec![8]);
+    }
+
+    #[test]
+    fn test_strip_windows_extended_prefix() {
+        use std::path::Path;
+        assert_eq!(
+            strip_windows_extended_prefix(Path::new(r"\\?\C:\Users\a\.claude\projects\p\s.jsonl")),
+            PathBuf::from(r"C:\Users\a\.claude\projects\p\s.jsonl")
+        );
+        assert_eq!(
+            strip_windows_extended_prefix(Path::new(r"\\?\UNC\server\share\p\s.jsonl")),
+            PathBuf::from(r"\\server\share\p\s.jsonl")
+        );
+        assert_eq!(
+            strip_windows_extended_prefix(Path::new("/home/a/.claude/projects/p/s.jsonl")),
+            PathBuf::from("/home/a/.claude/projects/p/s.jsonl")
+        );
     }
 
     // ===== Line Utils Tests =====
@@ -790,7 +838,7 @@ mod tests {
     fn test_find_line_ranges_empty() {
         let data = b"";
         let ranges = find_line_ranges(data);
-        assert!(ranges.is_empty());
+        assert_eq!(ranges, Vec::<(usize, usize)>::new());
     }
 
     #[test]
@@ -826,7 +874,7 @@ mod tests {
     fn test_find_line_ranges_only_newlines() {
         let data = b"\n\n\n";
         let ranges = find_line_ranges(data);
-        assert!(ranges.is_empty());
+        assert_eq!(ranges, Vec::<(usize, usize)>::new());
     }
 
     #[test]

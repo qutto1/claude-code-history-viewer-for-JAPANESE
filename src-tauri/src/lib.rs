@@ -54,8 +54,8 @@ use crate::commands::{
     },
     multi_provider::{
         detect_providers, get_provider_message_offset, load_provider_messages,
-        load_provider_messages_paginated, load_provider_sessions, load_provider_sessions_page,
-        scan_all_projects, search_all_providers,
+        load_provider_messages_paginated, load_provider_session_by_path, load_provider_sessions,
+        load_provider_sessions_page, scan_all_projects, search_all_providers,
     },
     project::{
         detect_claude_config_dir, get_claude_folder_path, get_git_log, scan_projects,
@@ -64,8 +64,9 @@ use crate::commands::{
     session::{
         delete_session, get_recent_edits, get_session_message_count, get_session_subagents,
         load_project_sessions, load_project_sessions_page, load_session_messages,
-        load_session_messages_paginated, open_resume_in_terminal, rename_opencode_session_title,
-        rename_session_native, reset_session_native_name, restore_file, search_messages,
+        load_session_messages_paginated, open_resume_in_terminal, read_restore_target,
+        rename_opencode_session_title, rename_session_native, reset_session_native_name,
+        restore_file, search_messages,
     },
     settings::{delete_preset, get_preset, load_presets, save_preset},
     stats::{
@@ -199,6 +200,7 @@ fn run_tauri() {
             get_session_subagents,
             get_recent_edits,
             restore_file,
+            read_restore_target,
             get_session_token_stats,
             get_project_token_stats,
             get_project_stats_summary,
@@ -257,6 +259,7 @@ fn run_tauri() {
             scan_all_projects,
             load_provider_sessions,
             load_provider_sessions_page,
+            load_provider_session_by_path,
             load_provider_messages,
             load_provider_messages_paginated,
             get_provider_message_offset,
@@ -385,7 +388,7 @@ mod ime_environment_tests {
         let updates =
             linux_ime_environment_updates(Some("custom-gtk"), Some("@im=custom"), Some("ibus"));
 
-        assert!(updates.is_empty());
+        assert_eq!(updates, Vec::<(&str, &str)>::new());
     }
 
     #[test]
@@ -399,7 +402,7 @@ mod ime_environment_tests {
     fn linux_ime_environment_does_nothing_without_ibus_signal() {
         let updates = linux_ime_environment_updates(None, None, None);
 
-        assert!(updates.is_empty());
+        assert_eq!(updates, Vec::<(&str, &str)>::new());
     }
 }
 
@@ -1081,6 +1084,28 @@ fn collect_watch_paths() -> Vec<std::path::PathBuf> {
         }
     }
 
+    // Kilo Code keeps its OpenCode-core sessions in kilo.db (no file-backed
+    // session/message storage dirs), so watching the store root covers it.
+    // Symlinked roots/databases are not registered — `is_file()` follows
+    // symlinks, and watching through one would observe paths outside the
+    // store (same hardening as the Kimi Code block above).
+    if let Some(kilo_base) = providers::kilo::get_base_path() {
+        let base = PathBuf::from(&kilo_base);
+        let is_real = |path: &std::path::Path, check: fn(&std::fs::FileType) -> bool| {
+            std::fs::symlink_metadata(path)
+                .map(|meta| check(&meta.file_type()))
+                .unwrap_or(false)
+        };
+        if is_real(&base, std::fs::FileType::is_dir)
+            && is_real(
+                &base.join(providers::kilo::DB_FILE),
+                std::fs::FileType::is_file,
+            )
+        {
+            paths.push(base);
+        }
+    }
+
     if let Some(codebuddy_base) = providers::codebuddy::get_base_path() {
         let codebuddy_projects = PathBuf::from(codebuddy_base);
         if codebuddy_projects.is_dir() {
@@ -1143,6 +1168,13 @@ fn collect_watch_paths() -> Vec<std::path::PathBuf> {
         let qwen_projects = PathBuf::from(qwen_base);
         if qwen_projects.is_dir() {
             paths.push(qwen_projects);
+        }
+    }
+
+    if let Some(zcode_base) = providers::zcode::get_base_path() {
+        let zcode_dir = PathBuf::from(zcode_base);
+        if zcode_dir.is_dir() {
+            paths.push(zcode_dir);
         }
     }
 

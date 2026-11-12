@@ -150,6 +150,7 @@ export interface AppStoreState {
   globalSummary: GlobalStatsSummary | null;
   globalConversationSummary: GlobalStatsSummary | null;
   isLoadingGlobalStats: boolean;
+  isViewingGlobalStats: boolean;
 
   // Metadata state
   userMetadata: UserMetadata;
@@ -194,6 +195,9 @@ export interface AppStoreState {
 
   // Navigator state
   isNavigatorOpen: boolean;
+
+  // Minimap state
+  isMinimapOpen: boolean;
 
   // Recent Edits panel state
   recentEditsMode: import('./recentEditsPanelSlice').RecentEditsMode;
@@ -267,7 +271,6 @@ export interface AppStoreActions {
   loadMoreMessages: () => Promise<void>;
   ensureMessageLoaded: (uuid: string) => Promise<boolean>;
   fetchFullSessionMessages: () => Promise<ClaudeMessage[]>;
-  refreshCurrentSession: () => Promise<void>;
   loadSessionTokenStats: (sessionPath: string) => Promise<void>;
   loadProjectTokenStats: (projectPath: string) => Promise<void>;
   loadMoreProjectTokenStats: (projectPath: string) => Promise<void>;
@@ -335,6 +338,7 @@ export interface AppStoreActions {
   // Global stats actions
   loadGlobalStats: () => Promise<void>;
   clearGlobalStats: () => void;
+  setViewingGlobalStats: (value: boolean) => void;
 
   // Metadata actions
   loadMetadata: () => Promise<void>;
@@ -422,6 +426,10 @@ export interface AppStoreActions {
   // Navigator actions
   toggleNavigator: () => void;
   setNavigatorOpen: (open: boolean) => void;
+
+  // Minimap actions
+  toggleMinimap: () => void;
+  setMinimapOpen: (open: boolean) => void;
 
   // Recent Edits panel actions
   setRecentEditsMode: (mode: import('./recentEditsPanelSlice').RecentEditsMode) => void;

@@ -38,6 +38,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { getVariantStyles, layout } from "../renderers";
 import { TruncatedPre } from "../common/TruncatedPre";
+import { ExpandKeyProvider, useExpandKeyPrefix } from "@/contexts/CaptureExpandContext";
 import type { SearchFilterType } from "../../store/useAppStore";
 import {
   isServerToolUseContent,
@@ -63,6 +64,8 @@ type Props = {
   currentMatchIndex?: number;
   skipToolResults?: boolean;
   skipText?: boolean;
+  /** Skip only the first text block (already rendered as the message bubble). */
+  skipFirstText?: boolean;
   skipThinking?: boolean;
   skipCommands?: boolean;
   skipToolCalls?: boolean;
@@ -146,6 +149,7 @@ export const ClaudeContentArrayRenderer = memo(({
   currentMatchIndex = 0,
   skipToolResults = false,
   skipText = false,
+  skipFirstText = false,
   skipThinking = false,
   skipCommands = false,
   skipToolCalls = false,
@@ -157,17 +161,19 @@ export const ClaudeContentArrayRenderer = memo(({
     [content]
   );
 
+  const firstTextIndex = Array.isArray(content)
+    ? content.findIndex((item) => isObjectItem(item) && item.type === "text")
+    : -1;
+  // Each entry gets its own expand-key scope: nested result renderers fall
+  // back to a shared "renderer" suffix, so without this every collapsible
+  // in the message toggled together.
+  const expandPrefix = useExpandKeyPrefix();
+
   if (normalizedContent.length === 0) {
     return null;
   }
 
-  // `empty:hidden` carries the "nothing survived the skip flags" case: when every
-  // entry renders null (an assistant text row whose text is already shown by
-  // MessageContentDisplay, for instance) the div has no child nodes, so it and
-  // its bottom margin drop out of the layout instead of leaving dead space.
-  return (
-    <div className="space-y-1 text-px12 mb-1 empty:hidden">
-      {normalizedContent.map((entry) => {
+  const renderEntry = (entry: NormalizedContentEntry) => {
         if (entry.kind === "toolExecution") {
           if (skipToolCalls) return null;
           return (
@@ -197,6 +203,7 @@ export const ClaudeContentArrayRenderer = memo(({
         switch (itemType) {
           case "text":
             if (skipText) return null;
+            if (skipFirstText && index === firstTextIndex) return null;
             if (typeof item.text === "string") {
               return (
                 <div
@@ -556,7 +563,20 @@ export const ClaudeContentArrayRenderer = memo(({
             );
           }
         }
-      })}
+  };
+
+  // `empty:hidden` carries the "nothing survived the skip flags" case: when every
+  // entry renders null (an assistant text row whose text is already shown by
+  // MessageContentDisplay, for instance) the div has no child nodes, so it and
+  // its bottom margin drop out of the layout instead of leaving dead space.
+  // ExpandKeyProvider is a bare context provider and adds no DOM node.
+  return (
+    <div className="space-y-1 text-px12 mb-1 empty:hidden">
+      {normalizedContent.map((entry) => (
+        <ExpandKeyProvider key={entry.key} value={`${expandPrefix}:${entry.key}`}>
+          {renderEntry(entry)}
+        </ExpandKeyProvider>
+      ))}
     </div>
   );
 });

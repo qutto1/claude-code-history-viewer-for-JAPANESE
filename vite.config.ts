@@ -14,6 +14,13 @@ export default defineConfig(async () => {
 
   return {
     base: "./",
+    // The search worker is created with `{ type: "module" }`, and its
+    // dependency graph (flexsearch) contains dynamic imports that rollup on
+    // macOS treats as code-splitting — which the default `iife` worker format
+    // rejects. ES output matches the instantiation and works everywhere.
+    worker: {
+      format: "es" as const,
+    },
     plugins: [
       react(),
       tailwindcss(),
@@ -174,10 +181,12 @@ export default defineConfig(async () => {
         "src/**/*.test.ts",
         "src/**/*.test.tsx",
         "src-tauri/tests/**/*.test.ts",
+        "scripts/**/*.test.mjs",
       ],
       environmentMatchGlobs: [
         // Node environment for file system tests
         ["src-tauri/tests/**", "node"],
+        ["scripts/**", "node"],
       ],
     },
 

@@ -152,6 +152,8 @@
   "session.selection.resumeSuccess": "Opened {{count}} session(s)",
   "session.selection.resumePartial": "Opened {{opened}}, failed {{failed}}",
   "session.selection.resumeError": "Failed to open terminal",
+  "session.selection.resumeDangerousTitle": "Permission checks disabled",
+  "session.selection.resumeDangerousWarning": "This will start {{count}} agents with permission checks disabled. Continue?",
   "session.selection.delete": "Delete ({{count}})",
   "session.selection.deleteTitle": "Delete {{count}} sessions",
   "session.selection.deleteTargets": "{{count}} sessions",
@@ -161,6 +163,8 @@
   "session.selection.deleteSuccess": "Deleted {{count}} session(s)",
   "session.selection.deletePartial": "Deleted {{deleted}}, failed {{failed}}",
   "session.copyResumeCommand": "Copy Resume Command",
+  "session.withCustomArguments": "with custom arguments",
+  "session.editCustomArguments": "Edit custom arguments…",
   "session.copySessionId": "Copy Session ID",
   "session.count": "Sessions: {{count}}",
   "session.filter.clearSearch": "Clear search",
@@ -244,7 +248,6 @@
   "session.nativeRename.warningCodex": "This operation updates Codex CLI thread metadata. The change is reversible.",
   "session.nativeRename.warningForgeCode": "This operation updates the ForgeCode conversation title stored in the Forge database.",
   "session.nativeRename.warningOpenCode": "This operation modifies the OpenCode session metadata file. The change is reversible.",
-  "session.refresh": "Refresh Sessions",
   "session.refreshAllConversations": "Refresh all conversations",
   "session.rename": "Rename session",
   "session.renameAction": "Rename session",
@@ -270,5 +273,8 @@
   "sessionPicker.title": "Choose a session",
   "sessionPicker.subtitle": "{{count}} sessions match \"{{value}}\"",
   "sessionPicker.empty": "No sessions match",
-  "sessionPicker.cancelled": "Startup session hint cancelled"
+  "sessionPicker.cancelled": "Startup session hint cancelled",
+  "session.pane.title": "Sessions",
+  "project.temporaryGroup": "Temporary locations",
+  "project.switchProvider": "Open {{provider}} sessions ({{count}})"
 }

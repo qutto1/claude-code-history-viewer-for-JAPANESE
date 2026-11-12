@@ -9,6 +9,8 @@ import {
   filterMessagesByCategory,
   getMessageUuidsByCategory,
 } from "../MessageViewer/helpers";
+import { getPromptJumpKeysLabel } from "../MessageViewer/helpers/promptJump";
+import { getKindLabelKey } from "./kindLabels";
 import { NavigatorEntry } from "./NavigatorEntry";
 import { useNavigatorEntries } from "./useNavigatorEntries";
 
@@ -38,6 +40,8 @@ export const MessageNavigator: React.FC<MessageNavigatorProps> = ({
 }) => {
   const { t } = useTranslation();
   const keyboardHelpId = `${asideId}-keyboard-help`;
+  // The shortcut acts on the message list, so the panel only describes it.
+  const promptJumpHint = t("navigator.promptJumpHint", { keys: getPromptJumpKeysLabel() });
   const scrollElementRef = useRef<HTMLDivElement>(null);
   const entryRefs = useRef(new Map<string, HTMLButtonElement>());
   const [filterText, setFilterText] = useState("");
@@ -67,22 +71,24 @@ export const MessageNavigator: React.FC<MessageNavigatorProps> = ({
   );
   const allEntries = useNavigatorEntries(navigatorMessages);
 
-  // Apply local filter (role + text)
+  // Apply local filter (kind label + text), matching what each row displays
   const entries = useMemo(() => {
     let filtered = allEntries;
     if (userOnlyFilter) {
-      filtered = filtered.filter((e) => e.role === "user");
+      // Rows the user typed: prompts and slash commands, not agent updates
+      // or injected context that Claude Code also stores as user messages.
+      filtered = filtered.filter((e) => e.kind === "prompt" || e.kind === "command");
     }
     const lower = filterText.trim().toLowerCase();
     if (lower) {
       filtered = filtered.filter(
         (e) =>
           e.preview.toLowerCase().includes(lower) ||
-          e.role.toLowerCase().includes(lower)
+          t(getKindLabelKey(e.kind)).toLowerCase().includes(lower)
       );
     }
     return filtered;
-  }, [allEntries, filterText, userOnlyFilter]);
+  }, [allEntries, filterText, userOnlyFilter, t]);
 
   // Height estimation function for @tanstack/react-virtual
   const estimateSize = useCallback((index: number) => {
@@ -146,7 +152,8 @@ export const MessageNavigator: React.FC<MessageNavigatorProps> = ({
   }, [entries, virtualizer]);
 
   const handleEntryKeyDown = useCallback((event: React.KeyboardEvent<HTMLButtonElement>) => {
-    if (entries.length === 0) return;
+    // Alt+Arrow belongs to the message list's prompt jump (usePromptJump).
+    if (entries.length === 0 || event.altKey) return;
 
     switch (event.key) {
       case "ArrowDown":
@@ -263,7 +270,7 @@ export const MessageNavigator: React.FC<MessageNavigatorProps> = ({
           )}
           aria-label={t("navigator.userOnly")}
           aria-pressed={userOnlyFilter}
-          title={t("navigator.userOnly")}
+          title={`${t("navigator.userOnly")}\n${promptJumpHint}`}
         >
           <User className="w-3.5 h-3.5" />
         </button>
@@ -377,7 +384,8 @@ export const MessageNavigator: React.FC<MessageNavigatorProps> = ({
         {t(
           "navigator.a11y.keyboardHelp",
           "Keyboard: use arrow keys to move between messages, Home and End to jump, and Enter or Space to open the focused message."
-        )}
+        )}{" "}
+        {promptJumpHint}
       </p>
     </aside>
   );

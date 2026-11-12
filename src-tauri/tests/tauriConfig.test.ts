@@ -236,12 +236,24 @@ describe('Tauri Configuration Tests', () => {
       it('should have valid GitHub update endpoints', () => {
         expect(Array.isArray(config.plugins.updater.endpoints)).toBe(true);
         expect(config.plugins.updater.endpoints.length).toBeGreaterThan(0);
-        
+
         config.plugins.updater.endpoints.forEach((endpoint: string) => {
           expect(endpoint).toMatch(/^https:\/\//); // HTTPS required
           expect(endpoint).toContain('github.com');
-          expect(endpoint).toContain('jhlee0409/claude-code-history-viewer');
           expect(endpoint).toContain('latest.json');
+        });
+      });
+
+      // Tauri v2's updater plugin has no `active` switch: it ignores that key,
+      // so `active: false` alone does not stop the startup update check. What
+      // actually keeps this fork from being offered the upstream build (which
+      // sorts as "newer" than any `-fork.N` pre-release and would pass the
+      // signature check, since the pubkey is upstream's) is that the endpoint
+      // points at this fork's own releases, which publish no latest.json.
+      it('should never point the updater at the upstream repository', () => {
+        config.plugins.updater.endpoints.forEach((endpoint: string) => {
+          expect(endpoint).not.toContain('jhlee0409');
+          expect(endpoint).toContain('qutto1/claude-code-history-viewer-for-JAPANESE');
         });
       });
 

@@ -40,12 +40,20 @@ export const useSessionAutoRefresh = (): void => {
       // Read through getState so the interval never needs re-creating when
       // unrelated store fields change.
       const state = useAppStore.getState();
-      if (!state.selectedSession || state.isLoadingMessages) return;
+      if (
+        !state.selectedSession ||
+        state.isLoadingMessages ||
+        state.isRefreshingAllConversations
+      ) {
+        return;
+      }
 
+      // The header's refresh button is `refreshAllConversations` (upstream
+      // folded the per-session button into it), so the timer runs that.
       inFlightRef.current = true;
       void state
-        .refreshCurrentSession()
-        .catch((err) => {
+        .refreshAllConversations()
+        .catch((err: unknown) => {
           console.error("[AutoRefresh] Failed to refresh session:", err);
         })
         .finally(() => {

@@ -88,7 +88,7 @@ describe("GroupedProjectList", () => {
   }
 
   it("routes chevron toggle through project click handler in flat mode", () => {
-    const project = createProject("/tmp/project-a", "project-a");
+    const project = createProject("/work/project-a", "project-a");
     const handleProjectClick = vi.fn();
 
     renderList({
@@ -104,12 +104,12 @@ describe("GroupedProjectList", () => {
   });
 
   it("routes chevron toggle through project click handler in directory mode", () => {
-    const project = createProject("/tmp/project-a", "project-a");
+    const project = createProject("/work/project-a", "project-a");
     const handleProjectClick = vi.fn();
     const directoryGroup: DirectoryGroup = {
-      name: "tmp",
-      path: "/tmp",
-      displayPath: "/tmp",
+      name: "work",
+      path: "/work",
+      displayPath: "/work",
       projects: [project],
     };
 
@@ -129,7 +129,7 @@ describe("GroupedProjectList", () => {
   });
 
   it("routes chevron toggle through project click handler in worktree mode", () => {
-    const project = createProject("/tmp/project-a", "project-a");
+    const project = createProject("/work/project-a", "project-a");
     const handleProjectClick = vi.fn();
     const worktreeGroup: WorktreeGroup = {
       parent: project,
@@ -153,7 +153,7 @@ describe("GroupedProjectList", () => {
 
   it("keeps unavailable projects in a collapsed, expandable group", () => {
     const project = {
-      ...createProject("/tmp/deleted-worktree", "deleted-worktree"),
+      ...createProject("/work/deleted-worktree", "deleted-worktree"),
       path_status: "unavailable" as const,
     };
 
@@ -172,7 +172,7 @@ describe("GroupedProjectList", () => {
 
   it("shows unavailable projects after expanding the status group", () => {
     const project = {
-      ...createProject("/tmp/deleted-worktree", "deleted-worktree"),
+      ...createProject("/work/deleted-worktree", "deleted-worktree"),
       path_status: "unavailable" as const,
     };
 
@@ -197,8 +197,8 @@ describe("GroupedProjectList multi-expand", () => {
   };
 
   function renderExpanded(expanded: string[], selectedPath: string | null) {
-    const a = createProject("/tmp/project-a", "project-a");
-    const b = createProject("/tmp/project-b", "project-b");
+    const a = createProject("/work/project-a", "project-a");
+    const b = createProject("/work/project-b", "project-b");
     const expandedSet = new Set(expanded);
     render(
       <GroupedProjectList
@@ -229,17 +229,17 @@ describe("GroupedProjectList multi-expand", () => {
   }
 
   it("shows a session list for every expanded project, not just the selected one", () => {
-    renderExpanded(["/tmp/project-a", "/tmp/project-b"], "/tmp/project-a");
+    renderExpanded(["/work/project-a", "/work/project-b"], "/work/project-a");
     expect(screen.getAllByTestId("session-list")).toHaveLength(2);
   });
 
   it("shows a session list for an expanded project even with nothing selected", () => {
-    renderExpanded(["/tmp/project-b"], null);
+    renderExpanded(["/work/project-b"], null);
     expect(screen.getAllByTestId("session-list")).toHaveLength(1);
   });
 
   it("shows no session list for a collapsed project", () => {
-    renderExpanded([], "/tmp/project-a");
+    renderExpanded([], "/work/project-a");
     expect(screen.queryAllByTestId("session-list")).toHaveLength(0);
   });
 });

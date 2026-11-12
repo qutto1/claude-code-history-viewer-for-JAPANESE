@@ -152,6 +152,8 @@
   "session.selection.resumeSuccess": "已開啟 {{count}} 個會話",
   "session.selection.resumePartial": "已開啟 {{opened}} 個，失敗 {{failed}} 個",
   "session.selection.resumeError": "無法開啟終端機",
+  "session.selection.resumeDangerousTitle": "已停用權限檢查",
+  "session.selection.resumeDangerousWarning": "將以停用權限檢查的狀態啟動 {{count}} 個 Agent。是否繼續？",
   "session.selection.delete": "刪除 ({{count}})",
   "session.selection.deleteTitle": "刪除 {{count}} 個會話",
   "session.selection.deleteTargets": "{{count}} 個會話",
@@ -161,6 +163,8 @@
   "session.selection.deleteSuccess": "已刪除 {{count}} 個會話",
   "session.selection.deletePartial": "已刪除 {{deleted}} 個，失敗 {{failed}} 個",
   "session.copyResumeCommand": "複製恢復命令",
+  "session.withCustomArguments": "含自訂參數",
+  "session.editCustomArguments": "編輯自訂參數…",
   "session.copySessionId": "複製會話ID",
   "session.count": "會話：{{count}}個",
   "session.filter.clearSearch": "清除搜尋",
@@ -244,7 +248,6 @@
   "session.nativeRename.warningCodex": "此操作會更新 Codex CLI 執行緒中繼資料。變更可以復原。",
   "session.nativeRename.warningForgeCode": "此操作會更新 Forge 資料庫中儲存的 ForgeCode 對話標題。",
   "session.nativeRename.warningOpenCode": "此操作會修改 OpenCode 會話中繼資料檔案。變更可以復原。",
-  "session.refresh": "重新整理會話",
   "session.refreshAllConversations": "重新整理所有對話",
   "session.rename": "重新命名會話",
   "session.renameAction": "重新命名會話",
@@ -270,5 +273,8 @@
   "sessionPicker.title": "選擇工作階段",
   "sessionPicker.subtitle": "{{count}} 個工作階段符合 \"{{value}}\"",
   "sessionPicker.empty": "沒有符合的工作階段",
-  "sessionPicker.cancelled": "啟動時的工作階段提示已取消"
+  "sessionPicker.cancelled": "啟動時的工作階段提示已取消",
+  "session.pane.title": "會話",
+  "project.temporaryGroup": "暫存位置",
+  "project.switchProvider": "開啟 {{provider}} 會話（{{count}}）"
 }

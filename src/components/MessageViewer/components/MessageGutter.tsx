@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/hover-card";
 import { formatTime, formatTimeShort } from "../../../utils/time";
 import { getShortModelName } from "../../../utils/model";
+import { ModelLifecycleBadge } from "@/components/ModelLifecycleBadge";
 import { getToolName } from "../../../utils/toolUtils";
 import {
   EXPENSIVE_MESSAGE_COST_USD,
@@ -80,9 +81,20 @@ const EFFORT_LABEL_KEYS: Record<string, string> = {
   max: "assistantMessageDetails.effortMax",
 };
 
-export const MessageGutter: React.FC<MessageGutterProps> = ({
+interface MessageGutterRenderProps extends MessageGutterProps {
+  /**
+   * Continuation row (same model and chain, shortly after the previous
+   * assistant turn): drop the time, model and branch lines that would only
+   * repeat the row above. Cost and the details card stay — each turn has its
+   * own price. Mirrors the `hideHeader` collapsing of the old header row.
+   */
+  hideHeader?: boolean;
+}
+
+export const MessageGutter: React.FC<MessageGutterRenderProps> = ({
   message,
   isModelChanged = false,
+  hideHeader = false,
 }) => {
   const { t } = useTranslation();
   // Hovering opens the details card; clicking pins it so it survives the
@@ -178,20 +190,22 @@ export const MessageGutter: React.FC<MessageGutterProps> = ({
       className="shrink-0 pt-0.5 text-px10 leading-tight text-right text-muted-foreground"
       style={{ width: GUTTER_WIDTH }}
     >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button type="button" className="cursor-default tabular-nums">
-            {formatTimeShort(message.timestamp)}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="top" sideOffset={4}>
-          <span className="font-medium">{roleLabel}</span>
-          {" · "}
-          {formatTime(message.timestamp)}
-        </TooltipContent>
-      </Tooltip>
+      {!hideHeader && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" className="cursor-default tabular-nums">
+              {formatTimeShort(message.timestamp)}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={4}>
+            <span className="font-medium">{roleLabel}</span>
+            {" · "}
+            {formatTime(message.timestamp)}
+          </TooltipContent>
+        </Tooltip>
+      )}
 
-      {shortModelName && (
+      {!hideHeader && shortModelName && (
         <div
           className={cn(
             "truncate",
@@ -200,6 +214,11 @@ export const MessageGutter: React.FC<MessageGutterProps> = ({
         >
           {shortModelName}
         </div>
+      )}
+
+      {/* Own line: the gutter is too narrow to fit the pill beside the label. */}
+      {!hideHeader && assistant?.model && (
+        <ModelLifecycleBadge model={assistant.model} compact className="px-1 py-0" />
       )}
 
       {(messageCost != null || hasDetails) && (
@@ -252,7 +271,10 @@ export const MessageGutter: React.FC<MessageGutterProps> = ({
                 onPointerDownOutside={handleDetailsPointerDownOutside}
                 onEscapeKeyDown={closeDetails}
               >
-                <p className="mb-1"><strong>{t("assistantMessageDetails.model")}:</strong> {assistant?.model}</p>
+                <p className="mb-1 flex flex-wrap items-center gap-1">
+                  <span><strong>{t("assistantMessageDetails.model")}:</strong> {assistant?.model}</span>
+                  {assistant?.model && <ModelLifecycleBadge model={assistant.model} />}
+                </p>
                 {assistant?.effort ? (
                   <p>
                     {t("assistantMessageDetails.effort")}: {(() => {
@@ -280,8 +302,8 @@ export const MessageGutter: React.FC<MessageGutterProps> = ({
         </div>
       )}
 
-      {message.isSidechain && (
-        <div className="mt-0.5 inline-block px-1 text-px9 font-mono bg-warning/20 text-warning-foreground rounded-full">
+      {!hideHeader && message.isSidechain && (
+        <div className="mt-0.5 inline-block px-1 text-px9 font-mono bg-warning/20 text-warning rounded-full">
           {t("messageViewer.branch")}
         </div>
       )}

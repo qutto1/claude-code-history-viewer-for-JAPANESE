@@ -31,7 +31,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getLocale } from "../../utils/time";
+import { formatTimeAgo as formatTimeAgoUtil } from "../../utils/time";
+import { isProjectTemporary } from "../../utils/pathUtils";
 import { ProjectContextMenu } from "../ProjectContextMenu";
 import { useProjectTreeState } from "./hooks/useProjectTreeState";
 import { GroupedProjectList } from "./components/GroupedProjectList";
@@ -42,7 +43,7 @@ import {
   buildTreeItemAnnouncement,
   findTypeaheadMatchIndex,
   getNextTreeItemIndex,
-  type TreeNavigationKey,
+  getTreeNavigationKey,
 } from "./treeKeyboard";
 import {
   DEFAULT_PROVIDER_ID,
@@ -89,6 +90,7 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
   isLoading,
   isLoadingMoreSessions = false,
   isViewingGlobalStats,
+  inlineSessions = true,
   width,
   isResizing,
   onResizeStart,
@@ -107,7 +109,7 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
   asideId = "project-explorer",
   onClose,
 }) => {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const keyboardHelpId = `${asideId}-keyboard-help`;
   const activeProviders = useAppStore((state) => state.activeProviders);
   const detectedProviders = useAppStore((state) => state.providers);
@@ -191,6 +193,7 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
       gemini: 0,
       goose: 0,
       grok: 0,
+      kilo: 0,
       kimi: 0,
       kiro: 0,
       llm: 0,
@@ -204,6 +207,7 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
       trae: 0,
       vibe: 0,
       zed: 0,
+      zcode: 0,
     };
 
     for (const project of projects) {
@@ -493,34 +497,8 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
     [providerCounts, t]
   );
 
-  const formatTimeAgo = (dateStr: string) => {
-    try {
-      const date = new Date(dateStr);
-      const now = new Date();
-      const diffMs = now.getTime() - date.getTime();
-      const diffMins = Math.floor(diffMs / (1000 * 60));
-      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-      const currentLanguage = i18n.language || "en";
-      const locale = getLocale(currentLanguage);
-
-      if (diffMins < 60) {
-        return t("common.time.minutesAgo", { count: diffMins });
-      } else if (diffHours < 24) {
-        return t("common.time.hoursAgo", { count: diffHours });
-      } else if (diffDays < 7) {
-        return t("common.time.daysAgo", { count: diffDays });
-      } else {
-        return date.toLocaleDateString(locale, {
-          month: "short",
-          day: "numeric",
-        });
-      }
-    } catch {
-      return dateStr;
-    }
-  };
+  // Re-created per render so the label follows the active language.
+  const formatTimeAgo = (dateStr: string) => formatTimeAgoUtil(dateStr);
 
   // Unified project click handler: syncs expand state with selection + accordion behavior
   const handleProjectClick = useCallback(
@@ -559,6 +537,11 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
     if (selectedProject.path_status === "unavailable") {
       return "group:unavailable-projects";
     }
+    // Temporary-location projects render under their own bucket in every
+    // grouping mode, so that bucket (not the directory group) must open.
+    if (isProjectTemporary(selectedProject)) {
+      return "group:temporary-projects";
+    }
 
     if (groupingMode === "directory") {
       const group = directoryGroups.find((candidate) =>
@@ -596,13 +579,16 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
   // Several projects can be expanded at once, and only the selected one is
   // loaded by `selectProject`. Fill in the rest so an expanded row is never
   // left showing an empty list.
+  // Only relevant when sessions render inline; the SessionsPane layout shows
+  // the selected project's sessions alone.
   useEffect(() => {
+    if (!inlineSessions) return;
     for (const key of expandedProjects) {
       if (key.startsWith("dir:") || key.startsWith("group:")) continue;
       const project = projects.find((p) => p.path === key);
       if (project) void ensureProjectSessionsLoaded(project);
     }
-  }, [expandedProjects, projects, ensureProjectSessionsLoaded]);
+  }, [inlineSessions, expandedProjects, projects, ensureProjectSessionsLoaded]);
 
   const handleGlobalStatsClick = useCallback(() => {
     // Expansions are the user's own arrangement of the tree now that several
@@ -771,20 +757,12 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
       return;
     }
 
-    if (
-      event.key !== "ArrowDown" &&
-      event.key !== "ArrowUp" &&
-      event.key !== "Home" &&
-      event.key !== "End"
-    ) {
+    const navigationKey = getTreeNavigationKey(event);
+    if (!navigationKey) {
       return;
     }
 
-    const nextIndex = getNextTreeItemIndex(
-      currentIndex,
-      treeItems.length,
-      event.key as TreeNavigationKey
-    );
+    const nextIndex = getNextTreeItemIndex(currentIndex, treeItems.length, navigationKey);
     if (nextIndex === currentIndex || nextIndex < 0) {
       return;
     }
@@ -1295,6 +1273,7 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
                 onSessionHover={onSessionHover}
                 onLoadMoreSessions={onLoadMoreSessions}
                 formatTimeAgo={formatTimeAgo}
+                inlineSessions={inlineSessions}
               />
             </div>
           )}
@@ -1336,6 +1315,8 @@ export const ProjectTree: React.FC<ProjectTreeProps> = ({
           onHide={onHideProject}
           onUnhide={onUnhideProject}
           isHidden={isProjectHidden(contextMenu.project.actual_path)}
+          providerSiblings={contextMenu.providerSiblings}
+          onSelectProject={handleProjectClick}
           environmentLabel={
             projectMetadata[contextMenu.project.actual_path]?.environmentLabel
           }

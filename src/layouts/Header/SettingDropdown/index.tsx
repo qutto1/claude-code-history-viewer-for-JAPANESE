@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-import { Settings, RefreshCw, MessageSquare, Folder, Loader2 } from "lucide-react";
+import { Settings, RefreshCw, MessageSquare, Folder, Loader2, Archive, SlidersHorizontal } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -18,14 +18,24 @@ import { DesktopOnly } from "@/contexts/platform";
 import { ThemeMenuGroup } from "./ThemeMenuGroup";
 import { LanguageMenuGroup } from "./LanguageMenuGroup";
 import { FilterMenuGroup } from "./FilterMenuGroup";
+import { ViewMenuGroup } from "./ViewMenuGroup";
 import { FontMenuGroup } from "./FontMenuGroup";
 import { AccessibilityMenuGroup } from "./AccessibilityMenuGroup";
 
 interface SettingDropdownProps {
   updater: UseUpdaterReturn;
+  /** Claude-only tool; disabled for other providers. */
+  onOpenArchive?: () => void;
+  archiveDisabled?: boolean;
+  onOpenSettingsManager?: () => void;
 }
 
-export const SettingDropdown = ({ updater }: SettingDropdownProps) => {
+export const SettingDropdown = ({
+  updater,
+  onOpenArchive,
+  archiveDisabled = false,
+  onOpenSettingsManager,
+}: SettingDropdownProps) => {
   const { t } = useTranslation();
   const { openModal } = useModal();
 
@@ -42,11 +52,34 @@ export const SettingDropdown = ({ updater }: SettingDropdownProps) => {
           >
             <Settings className="w-5 h-5 text-foreground" />
             {isCheckingForUpdates && (
-              <Loader2 className="absolute -top-1 -right-1 w-3 h-3 animate-spin text-blue-500" />
+              <Loader2 className="absolute -top-1 -right-1 w-3 h-3 animate-spin text-info" />
             )}
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuContent align="end" className="w-60">
+          {(onOpenSettingsManager || onOpenArchive) && (
+            <>
+              <DropdownMenuLabel>{t("common.settings.tools", "Claude Code")}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {onOpenSettingsManager && (
+                <DropdownMenuItem onClick={onOpenSettingsManager}>
+                  <SlidersHorizontal className="mr-2 h-4 w-4 text-foreground" />
+                  <span>{t("settingsManager.title")}</span>
+                </DropdownMenuItem>
+              )}
+              {onOpenArchive && (
+                <DropdownMenuItem onClick={onOpenArchive} disabled={archiveDisabled}>
+                  <Archive className="mr-2 h-4 w-4 text-foreground" />
+                  <span>
+                    {archiveDisabled
+                      ? t("common.settings.claudeOnly", { name: t("archive.title") })
+                      : t("archive.title")}
+                  </span>
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+            </>
+          )}
           <DropdownMenuLabel>{t('common.settings.title')}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -61,6 +94,9 @@ export const SettingDropdown = ({ updater }: SettingDropdownProps) => {
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <FilterMenuGroup />
+
+          <DropdownMenuSeparator />
+          <ViewMenuGroup />
 
           <DropdownMenuSeparator />
           <FontMenuGroup />

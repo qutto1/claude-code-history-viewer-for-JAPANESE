@@ -50,6 +50,7 @@ type TestStore = ProjectSlice & {
   excludeSidechain: boolean;
   analytics: { currentView: "messages" | "analytics" | "tokenStats" | "recentEdits" | "board" | "archive" };
   messages: unknown[];
+  parentSessionStack: ClaudeSession[];
   activeProviders: ProviderInfo["id"][];
   detectProviders: ReturnType<typeof vi.fn>;
   setActiveProviders: ReturnType<typeof vi.fn>;
@@ -117,6 +118,7 @@ const createTestStore = () =>
     excludeSidechain: true,
     analytics: { currentView: "messages" },
     messages: [],
+    parentSessionStack: [],
     activeProviders: ["claude"],
     detectProviders: vi.fn().mockResolvedValue(true),
     setActiveProviders: vi.fn().mockImplementation((ids: ProviderInfo["id"][]) => {
@@ -608,6 +610,229 @@ describe("projectSlice scanProjects", () => {
     expect(store.getState().sessions).toEqual([refreshedSession]);
     expect(store.getState().selectSession).toHaveBeenCalledWith(refreshedSession);
     expect(store.getState().isRefreshingAllConversations).toBe(false);
+  });
+
+  it("keeps the session selected when re-selecting it so the reload is in place (#609)", async () => {
+    // selectSession only treats a call as an in-place reload (keeping the
+    // subagent stack, pagination and search index) when the same session is
+    // still selected. Going through selectProject nulled it first.
+    const store = createTestStore();
+    const project = createMockProject("current", "claude");
+    const selectedSession = createMockSession("session-1", project);
+    const refreshedSession = { ...selectedSession, message_count: 3 };
+    const selectedAtSelectSession: Array<ClaudeSession | null> = [];
+    store.getState().selectSession.mockImplementation(async () => {
+      selectedAtSelectSession.push(store.getState().selectedSession);
+    });
+
+    store.setState({
+      claudePath: "/root/.claude",
+      providers: [
+        {
+          id: "claude",
+          display_name: "Claude Code",
+          base_path: "/root/.claude",
+          is_available: true,
+        },
+      ],
+      selectedProject: project,
+      selectedSession,
+      sessions: [selectedSession],
+      activeProviders: ["claude"],
+    });
+
+    vi.mocked(api).mockImplementation((command) => {
+      if (command === "scan_projects") {
+        return Promise.resolve([project]);
+      }
+      if (command === "load_provider_sessions_page") {
+        return Promise.resolve({
+          sessions: [refreshedSession],
+          total: 1,
+          offset: 0,
+          limit: 250,
+          nextOffset: 1,
+          hasMore: false,
+        });
+      }
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
+
+    await store.getState().refreshAllConversations();
+
+    expect(store.getState().selectSession).toHaveBeenCalledWith(refreshedSession);
+    expect(selectedAtSelectSession).toHaveLength(1);
+    expect(selectedAtSelectSession[0]?.file_path).toBe(selectedSession.file_path);
+  });
+
+  describe("selected session beyond the first page", () => {
+    // The list reloads only page 1. A session the user paged to is looked up
+    // on its own instead of being mistaken for a deleted one.
+    const project = createMockProject("current", "claude");
+    const firstPageSession = createMockSession("session-1", project);
+    const pagedSession = createMockSession("session-2", project);
+    const refreshedPagedSession = { ...pagedSession, message_count: 7 };
+    const firstPage = {
+      sessions: [firstPageSession],
+      total: 2,
+      offset: 0,
+      limit: 250,
+      nextOffset: 1,
+      hasMore: true,
+    };
+
+    const setup = (lookup: () => Promise<unknown>) => {
+      const store = createTestStore();
+      store.setState({
+        claudePath: "/root/.claude",
+        providers: [
+          {
+            id: "claude",
+            display_name: "Claude Code",
+            base_path: "/root/.claude",
+            is_available: true,
+          },
+        ],
+        selectedProject: project,
+        selectedSession: pagedSession,
+        sessions: [firstPageSession, pagedSession],
+        sessionsOffset: 2,
+        hasMoreSessions: false,
+        activeProviders: ["claude"],
+      });
+      vi.mocked(api).mockImplementation((command, args) => {
+        if (command === "scan_projects") {
+          return Promise.resolve([project]);
+        }
+        if (command === "load_provider_sessions_page") {
+          const offset = (args as { offset: number }).offset;
+          return Promise.resolve(
+            offset === 0
+              ? firstPage
+              : { sessions: [refreshedPagedSession], total: 2, offset: 1, limit: 250, nextOffset: 2, hasMore: false }
+          );
+        }
+        if (command === "load_provider_session_by_path") {
+          return lookup();
+        }
+        return Promise.reject(new Error(`Unexpected command: ${command}`));
+      });
+      return store;
+    };
+
+    it("keeps it selected and listed once when it still exists", async () => {
+      const store = setup(() => Promise.resolve(refreshedPagedSession));
+
+      await store.getState().refreshAllConversations();
+
+      expect(api).toHaveBeenCalledWith("load_provider_session_by_path", {
+        provider: "claude",
+        projectPath: project.path,
+        filePath: pagedSession.file_path,
+        excludeSidechain: true,
+      });
+      expect(store.getState().selectSession).toHaveBeenCalledWith(refreshedPagedSession);
+      expect(store.getState().selectedSession).toEqual(refreshedPagedSession);
+      expect(store.getState().sessions).toEqual([firstPageSession, refreshedPagedSession]);
+      // Pagination still continues from page 1.
+      expect(store.getState().sessionsOffset).toBe(1);
+      expect(store.getState().hasMoreSessions).toBe(true);
+    });
+
+    it("does not list it twice when its page is loaded later", async () => {
+      const store = setup(() => Promise.resolve(refreshedPagedSession));
+
+      await store.getState().refreshAllConversations();
+      await store.getState().loadMoreSessions();
+
+      expect(store.getState().selectedSession).toEqual(refreshedPagedSession);
+      expect(store.getState().sessions).toEqual([firstPageSession, refreshedPagedSession]);
+      expect(store.getState().hasMoreSessions).toBe(false);
+    });
+
+    it("leaves a subagent view alone instead of listing the subagent", async () => {
+      // A subagent view selects the subagent's own file (under
+      // `<session>/subagents/`), which is never a list row. Looking it up
+      // would append it to the sidebar.
+      const subagent = {
+        ...pagedSession,
+        session_id: `${project.path}/session-2/subagents/agent-a.jsonl`,
+        file_path: `${project.path}/session-2/subagents/agent-a.jsonl`,
+      };
+      const store = setup(() => Promise.resolve(subagent));
+      store.setState({ selectedSession: subagent, parentSessionStack: [pagedSession] });
+
+      await store.getState().reloadProjectSessions(project);
+
+      expect(api).not.toHaveBeenCalledWith("load_provider_session_by_path", expect.anything());
+      expect(store.getState().sessions).toEqual([firstPageSession]);
+      expect(store.getState().selectedSession).toBe(subagent);
+    });
+
+    it("keeps the row's summary when the lookup has none (empty counts as none)", async () => {
+      const store = setup(() => Promise.resolve({ ...refreshedPagedSession, summary: "" }));
+      store.setState({ selectedSession: { ...pagedSession, summary: "Borrowed title" } });
+
+      await store.getState().reloadProjectSessions(project);
+
+      expect(store.getState().selectedSession?.summary).toBe("Borrowed title");
+      expect(store.getState().sessions[1]?.summary).toBe("Borrowed title");
+    });
+
+    it("clears it when its file is gone", async () => {
+      const store = setup(() => Promise.resolve(null));
+
+      await store.getState().refreshAllConversations();
+
+      expect(store.getState().selectedSession).toBeNull();
+      expect(store.getState().sessions).toEqual([firstPageSession]);
+    });
+  });
+
+  it("drops a next page requested while a reload is in flight", async () => {
+    // A reload keeps the rows on screen and leaves the spinner off, so the
+    // list can still ask for the next page at the offset of the OLD list.
+    // Appending that page after the reloaded page 1 skips the rows between.
+    const project = createMockProject("current", "claude");
+    const [s0, s1, s2, s3, s4] = ["s0", "s1", "s2", "s3", "s4"].map((id) =>
+      createMockSession(id, project)
+    );
+    const store = createTestStore();
+    store.setState({
+      selectedProject: project,
+      selectedSession: null,
+      sessions: [s1, s2, s3],
+      sessionsOffset: 3,
+      hasMoreSessions: true,
+    });
+    const firstPage = createDeferred<unknown>();
+    const nextPage = createDeferred<unknown>();
+    vi.mocked(api).mockImplementation((command, args) => {
+      if (command === "load_provider_sessions_page") {
+        return (args as { offset: number }).offset === 0
+          ? (firstPage.promise as Promise<never>)
+          : (nextPage.promise as Promise<never>);
+      }
+      return Promise.reject(new Error(`Unexpected command: ${command}`));
+    });
+
+    const reload = store.getState().reloadProjectSessions(project);
+    const loadMore = store.getState().loadMoreSessions();
+    expect(api).toHaveBeenCalledWith(
+      "load_provider_sessions_page",
+      expect.objectContaining({ offset: 3 })
+    );
+
+    // A new session s0 shifted everything down by one.
+    firstPage.resolve({ sessions: [s0, s1], total: 5, offset: 0, limit: 2, nextOffset: 2, hasMore: true });
+    await reload;
+    nextPage.resolve({ sessions: [s4], total: 5, offset: 3, limit: 2, nextOffset: 4, hasMore: false });
+    await loadMore;
+
+    expect(store.getState().sessions).toEqual([s0, s1]);
+    expect(store.getState().sessionsOffset).toBe(2);
+    expect(store.getState().hasMoreSessions).toBe(true);
+    expect(store.getState().isLoadingMoreSessions).toBe(false);
   });
 
   it("clears stale selection when the selected project no longer exists", async () => {

@@ -196,6 +196,12 @@ export function estimateMessageHeight(
   }
 
   const contentExtra = estimateContentExtraHeight(item);
+  // Upstream subtracts the ~28px role/time/model header from continuation rows
+  // because it sits on its own line above the bubble. In this fork that
+  // metadata lives in the left gutter, so hiding it frees no vertical space:
+  // a continuation row is as tall as its body. Subtracting here would push the
+  // first-paint estimate under the real height and make the scrollbar jump
+  // when the row is measured.
 
   // Type-based estimation
   switch (message.type) {

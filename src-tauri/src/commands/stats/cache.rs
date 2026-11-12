@@ -54,16 +54,18 @@
 //! (`opencode://` …) and carry no `(size, mtime)` identity.
 
 use super::{
-    build_model_stats, dedup_usage_key, extract_token_usage, extract_token_usage_from_global_entry,
-    merge_model_context_usage, parse_global_stats_entry_simd, parse_raw_log_entry_simd,
-    parse_timestamp_utc, should_include_stats_entry, token_usage_has_token_fields,
-    token_usage_totals, track_skill_and_subagent_usage,
+    capture_session_title, dedup_usage_key, extract_token_usage,
+    extract_token_usage_from_global_entry, full_usage_growth, merge_model_context_usage,
+    parse_global_stats_entry_simd, parse_raw_log_entry_simd, parse_timestamp_utc,
+    should_include_stats_entry, token_usage_has_token_fields, track_skill_and_subagent_usage,
     track_skill_and_subagent_usage_from_global_entry, track_tool_usage,
-    track_tool_usage_from_global_entry, ModelContextUsageMap, ModelUsageAggregate,
-    ProjectSessionFileStats, SessionComparisonStats, SessionFileStats, StatsMode, StatsProvider,
-    UNKNOWN_MODEL_NAME,
+    track_tool_usage_from_global_entry, usage_context_tokens, usage_growth, ModelContextUsageMap,
+    ModelUsageAggregate, ProjectSessionFileStats, SeenUsage, SessionComparisonStats,
+    SessionFileStats, SessionTokenAccum, StatsMode, StatsProvider, UsageGrowth, UNKNOWN_MODEL_NAME,
 };
-use crate::models::{ClaudeMessage, DailyStats, SessionTokenStats, TokenUsage, ToolUsageStats};
+#[cfg(test)]
+use crate::models::SessionTokenStats;
+use crate::models::{ClaudeMessage, DailyStats, TokenUsage};
 use crate::utils::find_line_ranges;
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use memmap2::Mmap;
@@ -136,7 +138,7 @@ pub(super) struct FileAggregate {
     /// Rows whose timestamp does not parse; included only when no date filter
     /// is active (mirrors `is_within_date_limits(None, ..)`).
     undated: DayBucket,
-    /// Last summary-row text in file order (filter-independent).
+    /// Session title (filter-independent): last `ai-title`, else last summary row.
     summary: Option<String>,
     /// A deduped usage key was first seen in one bucket and repeated in
     /// another; filtered composition would misattribute its tokens.
@@ -279,33 +281,33 @@ fn note_build(key: &Path) {
     }
 }
 
+/// First bucket that claimed a usage key, plus the largest usage seen for it.
+type BucketedUsage = (Option<String>, SeenUsage);
+
 /// Dedup-aware token totals that also record which bucket first claimed the
-/// usage key (#283). A duplicate landing in a different bucket than its
-/// first occurrence makes filtered composition unsound — the cold scan would
+/// usage key (#283). Repeated rows contribute only their growth over the
+/// largest usage seen for the key, so a streamed turn counts its final usage
+/// once (#575). A duplicate landing in a different bucket than its first
+/// occurrence makes filtered composition unsound — the cold scan would
 /// re-attribute the usage to the first *in-range* row — so it flips
 /// `spans_buckets` and filtered queries fall back to the full scan.
 fn bucketed_dedup_totals(
-    first_bucket_by_key: &mut HashMap<String, Option<String>>,
+    first_bucket_by_key: &mut HashMap<String, BucketedUsage>,
     dedup_key: Option<String>,
     bucket: Option<&str>,
     usage: &TokenUsage,
     spans_buckets: &mut bool,
-) -> (u64, u64, u64, u64, u64, u64) {
+) -> UsageGrowth {
     let Some(key) = dedup_key else {
-        return token_usage_totals(usage);
+        return full_usage_growth(usage);
     };
-    match first_bucket_by_key.entry(key) {
-        Entry::Vacant(vacant) => {
-            vacant.insert(bucket.map(str::to_string));
-            token_usage_totals(usage)
-        }
-        Entry::Occupied(occupied) => {
-            if occupied.get().as_deref() != bucket {
-                *spans_buckets = true;
-            }
-            (0, 0, 0, 0, 0, 0)
-        }
+    let (first_bucket, seen) = first_bucket_by_key
+        .entry(key)
+        .or_insert_with(|| (bucket.map(str::to_string), SeenUsage::default()));
+    if first_bucket.as_deref() != bucket {
+        *spans_buckets = true;
     }
+    usage_growth(seen, usage)
 }
 
 /// Dedup an authoritative source cost while recording whether the same
@@ -394,6 +396,7 @@ impl DayBucket {
         totals: (u64, u64, u64, u64, u64, u64),
         service_tier: Option<&str>,
         cache_creation_tokens_1h: u64,
+        context_tokens: u64,
         cost_usd: Option<f64>,
     ) {
         super::accumulate_model_usage(
@@ -405,6 +408,7 @@ impl DayBucket {
                 service_tier,
                 totals,
                 cache_creation_tokens_1h,
+                context_tokens,
                 source_cost: cost_usd,
             },
         );
@@ -459,7 +463,7 @@ pub(super) fn build_global_file_aggregate(
     let mmap = unsafe { Mmap::map(&file) }.ok()?;
 
     let mut aggregate = FileAggregate::default();
-    let mut first_bucket_by_key: HashMap<String, Option<String>> = HashMap::new();
+    let mut first_bucket_by_key: HashMap<String, BucketedUsage> = HashMap::new();
     let mut first_cost_bucket_by_key: HashMap<String, Option<String>> = HashMap::new();
     let mut day_timestamps: HashMap<String, Vec<DateTime<Utc>>> = HashMap::new();
     let mut row_seq = 0u64;
@@ -485,13 +489,14 @@ pub(super) fn build_global_file_aggregate(
         let message_id = entry.message.as_ref().and_then(|m| m.id.as_deref());
         let uuid = entry.uuid.as_deref().unwrap_or("");
         let dedup_key = dedup_usage_key("", message_id, uuid);
-        let totals = bucketed_dedup_totals(
+        let growth = bucketed_dedup_totals(
             &mut first_bucket_by_key,
             dedup_key,
             date.as_deref(),
             &usage,
             &mut aggregate.dedup_spans_buckets,
         );
+        let totals = growth.totals;
         let source_cost = entry
             .cost_usd
             .or_else(|| entry.message.as_ref().and_then(|message| message.cost_usd));
@@ -530,7 +535,8 @@ pub(super) fn build_global_file_aggregate(
                 model_name,
                 totals,
                 usage.service_tier.as_deref(),
-                u64::from(usage.cache_creation_input_tokens_1h.unwrap_or(0)),
+                growth.cache_creation_tokens_1h,
+                usage_context_tokens(&usage),
                 deduped_source_cost,
             );
         }
@@ -562,23 +568,21 @@ pub(super) fn build_message_file_aggregate(
     let mmap = unsafe { Mmap::map(&file) }.ok()?;
 
     let mut aggregate = FileAggregate::default();
-    let mut first_bucket_by_key: HashMap<String, Option<String>> = HashMap::new();
+    let mut first_bucket_by_key: HashMap<String, BucketedUsage> = HashMap::new();
     let mut first_cost_bucket_by_key: HashMap<String, Option<String>> = HashMap::new();
     let mut day_timestamps: HashMap<String, Vec<DateTime<Utc>>> = HashMap::new();
     let mut row_seq = 0u64;
+    let mut ai_title: Option<String> = None;
+    let mut summary: Option<String> = None;
 
     for (start, end) in find_line_ranges(&mmap) {
         let mut line_bytes = mmap[start..end].to_vec();
         let Some(log_entry) = parse_raw_log_entry_simd(&mut line_bytes) else {
             continue;
         };
-        // Summary text is captured before ClaudeMessage::try_from rejects
+        // Title text is captured before ClaudeMessage::try_from consumes
         // the row, mirroring scan_session_token_stats (filter-independent).
-        if log_entry.message_type == "summary" {
-            if let Some(summary) = &log_entry.summary {
-                aggregate.summary = Some(summary.clone());
-            }
-        }
+        capture_session_title(&log_entry, &mut ai_title, &mut summary);
         let Ok(message) = ClaudeMessage::try_from(log_entry) else {
             continue;
         };
@@ -599,13 +603,14 @@ pub(super) fn build_message_file_aggregate(
             message.message_id.as_deref(),
             &message.uuid,
         );
-        let totals = bucketed_dedup_totals(
+        let growth = bucketed_dedup_totals(
             &mut first_bucket_by_key,
             dedup_key,
             date.as_deref(),
             &usage,
             &mut aggregate.dedup_spans_buckets,
         );
+        let totals = growth.totals;
         let deduped_source_cost = bucketed_dedup_source_cost(
             &mut first_cost_bucket_by_key,
             dedup_usage_key(
@@ -638,7 +643,8 @@ pub(super) fn build_message_file_aggregate(
                 model_name,
                 totals,
                 usage.service_tier.as_deref(),
-                u64::from(usage.cache_creation_input_tokens_1h.unwrap_or(0)),
+                growth.cache_creation_tokens_1h,
+                usage_context_tokens(&usage),
                 deduped_source_cost,
             );
         }
@@ -651,6 +657,7 @@ pub(super) fn build_message_file_aggregate(
     }
 
     finalize_runs(&mut aggregate, day_timestamps);
+    aggregate.summary = ai_title.or(summary);
     Some(aggregate)
 }
 
@@ -705,7 +712,7 @@ fn included_buckets<'a>(
     })
 }
 
-fn merge_counter_map(
+pub(super) fn merge_counter_map(
     target: &mut HashMap<String, (u32, u32)>,
     source: &HashMap<String, (u32, u32)>,
 ) {
@@ -716,7 +723,7 @@ fn merge_counter_map(
     }
 }
 
-fn merge_model_map(
+pub(super) fn merge_model_map(
     target: &mut HashMap<String, ModelUsageAggregate>,
     source: &HashMap<String, ModelUsageAggregate>,
 ) {
@@ -937,13 +944,28 @@ pub(super) fn compose_project(
     Composed::Ready(Some(stats))
 }
 
-/// Compose session token stats from the cached aggregate.
+/// Compose session token stats from the cached aggregate (cache equivalence
+/// tests compare this with the full scan).
+#[cfg(test)]
 pub(super) fn compose_session_token(
     aggregate: &FileAggregate,
     project_name: String,
     s_limit: Option<&DateTime<Utc>>,
     e_limit: Option<&DateTime<Utc>>,
 ) -> Composed<Option<SessionTokenStats>> {
+    match compose_session_token_accum(aggregate, s_limit, e_limit) {
+        Composed::Ready(accum) => Composed::Ready(accum.map(|a| a.into_stats(project_name))),
+        Composed::NeedsFullScan => Composed::NeedsFullScan,
+    }
+}
+
+/// [`compose_session_token`] before finalisation, so it can be merged with
+/// the other transcripts of the same session (#577).
+pub(super) fn compose_session_token_accum(
+    aggregate: &FileAggregate,
+    s_limit: Option<&DateTime<Utc>>,
+    e_limit: Option<&DateTime<Utc>>,
+) -> Composed<Option<SessionTokenAccum>> {
     let Some(selection) = included_buckets(aggregate, s_limit, e_limit) else {
         return Composed::NeedsFullScan;
     };
@@ -952,19 +974,11 @@ pub(super) fn compose_session_token(
         return Composed::Ready(None);
     };
 
-    let mut total_input_tokens = 0u64;
-    let mut total_output_tokens = 0u64;
-    let mut total_cache_creation_tokens = 0u64;
-    let mut total_cache_read_tokens = 0u64;
-    let mut total_reasoning_tokens = 0u64;
-    let mut message_count = 0usize;
-    let mut tool_usage: HashMap<String, (u32, u32)> = HashMap::new();
-    let mut model_usage: HashMap<String, ModelUsageAggregate> = HashMap::new();
-    let mut model_context_usage: ModelContextUsageMap = HashMap::new();
-    let mut model_costs: HashMap<String, f64> = HashMap::new();
-    let mut first: Option<(DateTime<Utc>, &String)> = None;
-    let mut last: Option<(DateTime<Utc>, &String)> = None;
-
+    let mut accum = SessionTokenAccum {
+        session_id: session_id.to_string(),
+        summary: aggregate.summary.clone(),
+        ..SessionTokenAccum::default()
+    };
     let undated_iter = selection
         .include_undated
         .then_some(&aggregate.undated)
@@ -975,79 +989,30 @@ pub(super) fn compose_session_token(
         .map(|(_, bucket)| *bucket)
         .chain(undated_iter)
     {
-        message_count += bucket.message_count as usize;
-        total_input_tokens += bucket.input_tokens;
-        total_output_tokens += bucket.output_tokens;
-        total_cache_creation_tokens += bucket.cache_creation_tokens;
-        total_cache_read_tokens += bucket.cache_read_tokens;
-        total_reasoning_tokens += bucket.reasoning_tokens;
-        merge_counter_map(&mut tool_usage, &bucket.tool_usage);
-        merge_model_map(&mut model_usage, &bucket.model_usage);
-        merge_model_context_usage(&mut model_context_usage, &bucket.model_context_usage);
+        accum.message_count += bucket.message_count as usize;
+        accum.input_tokens += bucket.input_tokens;
+        accum.output_tokens += bucket.output_tokens;
+        accum.cache_creation_tokens += bucket.cache_creation_tokens;
+        accum.cache_read_tokens += bucket.cache_read_tokens;
+        accum.reasoning_tokens += bucket.reasoning_tokens;
+        merge_counter_map(&mut accum.tool_usage, &bucket.tool_usage);
+        merge_model_map(&mut accum.model_usage, &bucket.model_usage);
+        merge_model_context_usage(&mut accum.model_context_usage, &bucket.model_context_usage);
         for (model, cost) in &bucket.model_costs {
-            *model_costs.entry(model.clone()).or_insert(0.0) += cost;
+            *accum.model_costs.entry(model.clone()).or_insert(0.0) += cost;
         }
-
         if let (Some(ts), Some(raw)) = (bucket.first_ts, bucket.first_ts_raw.as_ref()) {
-            if first.map_or(true, |(current, _)| ts < current) {
-                first = Some((ts, raw));
-            }
+            accum.observe_first(ts, raw);
         }
         if let (Some(ts), Some(raw)) = (bucket.last_ts, bucket.last_ts_raw.as_ref()) {
-            if last.map_or(true, |(current, _)| ts > current) {
-                last = Some((ts, raw));
-            }
+            accum.observe_last(ts, raw);
         }
     }
 
-    if message_count == 0 {
+    if accum.message_count == 0 {
         return Composed::Ready(None);
     }
-
-    let total_tokens = total_input_tokens
-        + total_output_tokens
-        + total_cache_creation_tokens
-        + total_cache_read_tokens
-        + total_reasoning_tokens;
-
-    Composed::Ready(Some(SessionTokenStats {
-        session_id: session_id.to_string(),
-        project_name,
-        total_input_tokens,
-        total_output_tokens,
-        total_cache_creation_tokens,
-        total_cache_read_tokens,
-        total_reasoning_tokens,
-        total_tokens,
-        message_count,
-        first_message_time: first
-            .map(|(_, raw)| raw.clone())
-            .unwrap_or_else(|| "unknown".to_string()),
-        last_message_time: last
-            .map(|(_, raw)| raw.clone())
-            .unwrap_or_else(|| "unknown".to_string()),
-        summary: aggregate.summary.clone(),
-        model_distribution: build_model_stats(
-            StatsProvider::Claude,
-            model_usage,
-            model_context_usage,
-            model_costs,
-        ),
-        // The scan path emits the map unsorted; keep that shape.
-        most_used_tools: tool_usage
-            .into_iter()
-            .map(|(name, (usage, success))| ToolUsageStats {
-                tool_name: name,
-                usage_count: usage,
-                success_rate: if usage > 0 {
-                    (success as f32 / usage as f32) * 100.0
-                } else {
-                    0.0
-                },
-                avg_execution_time: None,
-            })
-            .collect(),
-    }))
+    Composed::Ready(Some(accum))
 }
 
 /// Compose session comparison stats from the cached aggregate.
@@ -1151,7 +1116,7 @@ mod tests {
         scan_session_token_stats,
     };
     use super::*;
-    use crate::models::TokenDistribution;
+    use crate::models::{TokenDistribution, ToolUsageStats};
     use std::fs::{File, OpenOptions};
     use std::io::Write;
     use tempfile::TempDir;
@@ -1553,6 +1518,144 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    /// #575: streaming rows of one turn share `message.id` with growing
+    /// `output_tokens`. Cached composition and the cold scan must both count
+    /// the turn's final output once.
+    fn test_streaming_growth_counts_final_output_in_cache_and_scan() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let project_dir = temp_dir.path().join("demo-project");
+        fs::create_dir_all(&project_dir).expect("project dir");
+        let file = project_dir.join("streaming.jsonl");
+        write_session(
+            &file,
+            &[
+                asst_line("u1", "m1", "2025-03-01T10:00:00Z", 100, 3, ""),
+                asst_line("u2", "m1", "2025-03-01T10:00:01Z", 100, 40, ""),
+                asst_line("u3", "m1", "2025-03-01T10:00:02Z", 100, 95, ""),
+                asst_line("u4", "m2", "2025-03-01T10:05:00Z", 20, 7, ""),
+            ],
+        );
+        let mode = StatsMode::BillingTotal;
+
+        let global = build_global_file_aggregate(&file, mode).expect("global aggregate");
+        let composed_global =
+            match compose_global(&global, claude_session_project_name(&file), None, None) {
+                Composed::Ready(stats) => stats,
+                Composed::NeedsFullScan => panic!("unfiltered compose must be ready"),
+            };
+        let scanned_global =
+            scan_session_file_for_global_stats(&file, mode, None, None).expect("global scan");
+        assert_eq!(scanned_global.token_distribution.output, 95 + 7);
+        assert_eq!(scanned_global.token_distribution.input, 100 + 20);
+        assert_global_stats_eq(&composed_global, &scanned_global);
+
+        let message = build_message_file_aggregate(&file, mode).expect("message aggregate");
+        let composed_token =
+            match compose_session_token(&message, claude_session_project_name(&file), None, None) {
+                Composed::Ready(stats) => stats.expect("token stats"),
+                Composed::NeedsFullScan => panic!("unfiltered compose must be ready"),
+            };
+        let scanned_token = scan_session_token_stats(&file, mode, None, None).expect("token scan");
+        assert_eq!(scanned_token.total_output_tokens, 95 + 7);
+        assert_token_stats_eq(&composed_token, &scanned_token);
+    }
+
+    /// Session title in stats (#601): the last Claude Code `ai-title` record
+    /// outranks a legacy `summary` row, in both the cold scan and the cache.
+    fn assert_stats_summary(lines: &[String], expected: &str) {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let file = temp_dir.path().join("demo-project").join("s1.jsonl");
+        fs::create_dir_all(file.parent().unwrap()).expect("project dir");
+        write_session(&file, lines);
+        let mode = StatsMode::BillingTotal;
+
+        let scanned = scan_session_token_stats(&file, mode, None, None).expect("scan");
+        assert_eq!(scanned.summary.as_deref(), Some(expected), "cold scan");
+
+        let aggregate = build_message_file_aggregate(&file, mode).expect("aggregate");
+        assert_eq!(
+            aggregate.summary.as_deref(),
+            Some(expected),
+            "cached aggregate"
+        );
+    }
+
+    #[test]
+    fn test_stats_summary_prefers_ai_title_over_legacy_summary() {
+        assert_stats_summary(
+            &[
+                r#"{"type":"summary","summary":"Legacy summary","leafUuid":"u1"}"#.to_string(),
+                asst_line("u1", "m1", "2025-03-01T10:00:00Z", 10, 1, ""),
+                r#"{"type":"ai-title","aiTitle":"Fix login bug","sessionId":"s1"}"#.to_string(),
+            ],
+            "Fix login bug",
+        );
+    }
+
+    #[test]
+    fn test_stats_summary_last_ai_title_wins() {
+        assert_stats_summary(
+            &[
+                r#"{"type":"ai-title","aiTitle":"First title","sessionId":"s1"}"#.to_string(),
+                asst_line("u1", "m1", "2025-03-01T10:00:00Z", 10, 1, ""),
+                r#"{"type":"ai-title","aiTitle":"Second title","sessionId":"s1"}"#.to_string(),
+                r#"{"type":"summary","summary":"Legacy summary","leafUuid":"u1"}"#.to_string(),
+            ],
+            "Second title",
+        );
+    }
+
+    #[test]
+    /// Streaming growth rows keep the turn's long-context tier and only their
+    /// own cache-write TTL, identically in cached composition and cold scan.
+    fn test_streaming_growth_context_and_ttl_match_between_cache_and_scan() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let project_dir = temp_dir.path().join("demo-project");
+        fs::create_dir_all(&project_dir).expect("project dir");
+        let file = project_dir.join("streaming-context.jsonl");
+        let row = |uuid: &str, ts: &str, output: u64, cache_creation: u64| {
+            format!(
+                r#"{{"uuid":"{uuid}","sessionId":"s1","timestamp":"{ts}","type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":"ok"}}],"id":"m1","model":"gemini-2.5-pro","usage":{{"input_tokens":250000,"output_tokens":{output},"cache_creation_input_tokens":{cache_creation},"cache_creation":{{"ephemeral_1h_input_tokens":100}}}}}}}}"#
+            )
+        };
+        write_session(
+            &file,
+            &[
+                row("u1", "2025-03-01T10:00:00Z", 10, 100),
+                row("u2", "2025-03-01T10:00:01Z", 150, 200),
+                row("u3", "2025-03-01T10:00:02Z", 222, 200),
+            ],
+        );
+        let mode = StatsMode::BillingTotal;
+        let aggregate = build_message_file_aggregate(&file, mode).expect("aggregate");
+        let composed =
+            match compose_session_token(&aggregate, claude_session_project_name(&file), None, None)
+            {
+                Composed::Ready(stats) => stats.expect("token stats"),
+                Composed::NeedsFullScan => panic!("unfiltered compose must be ready"),
+            };
+        let scanned = scan_session_token_stats(&file, mode, None, None).expect("scan");
+
+        let context = |stats: &SessionTokenStats| -> Vec<(u64, u64, u64, u64)> {
+            stats.model_distribution[0]
+                .context_breakdown
+                .iter()
+                .map(|c| {
+                    (
+                        c.min_context_tokens,
+                        c.output_tokens,
+                        c.cache_creation_tokens_1h,
+                        c.cache_creation_tokens_5m,
+                    )
+                })
+                .collect()
+        };
+        assert_eq!(context(&scanned), vec![(200_001, 222, 100, 100)]);
+        assert_eq!(context(&composed), context(&scanned));
+        assert_token_stats_eq(&composed, &scanned);
     }
 
     #[test]

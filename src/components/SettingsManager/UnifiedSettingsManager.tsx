@@ -31,6 +31,11 @@ import { SettingsDiagnosticsPanel } from "./dialogs/SettingsDiagnosticsPanel";
 import { CustomDirectoriesSection } from "./sections/CustomDirectoriesSection";
 import { WslSection } from "./sections/WslSection";
 import { AutoRefreshSection } from "./sections/AutoRefreshSection";
+import { SessionResumeSection } from "./sections/SessionResumeSection";
+import {
+  OPEN_SETTINGS_SECTION_EVENT,
+  consumeRequestedSettingsSection,
+} from "./settingsNavigation";
 
 export type ActivePanel = "editor" | "diagnostics";
 
@@ -91,10 +96,6 @@ export const useSettingsManager = () => {
   return context;
 };
 
-// ============================================================================
-// Main Component
-// ============================================================================
-
 export const UnifiedSettingsManager: React.FC<UnifiedSettingsManagerProps> = ({
   projectPath: initialProjectPath,
   className,
@@ -115,6 +116,7 @@ export const UnifiedSettingsManager: React.FC<UnifiedSettingsManagerProps> = ({
   // Panel state
   const [activePanel, setActivePanel] = React.useState<ActivePanel>("editor");
   const [isCustomDirsExpanded, setIsCustomDirsExpanded] = React.useState(false);
+  const [isSessionResumeExpanded, setIsSessionResumeExpanded] = React.useState(false);
   const [isWslExpanded, setIsWslExpanded] = React.useState(false);
   const [isAutoRefreshExpanded, setIsAutoRefreshExpanded] = React.useState(false);
 
@@ -181,6 +183,7 @@ export const UnifiedSettingsManager: React.FC<UnifiedSettingsManagerProps> = ({
         });
         await loadSettings();
       } catch (err) {
+        // Callers (editor pane, preset panel) render the failure inline.
         console.error("Failed to save settings:", err);
         throw err;
       }
@@ -200,6 +203,37 @@ export const UnifiedSettingsManager: React.FC<UnifiedSettingsManagerProps> = ({
   React.useEffect(() => {
     setPendingSettings(null);
   }, [activeScope]);
+
+  // Listen for open-settings-section events to expand and scroll to target card
+  React.useEffect(() => {
+    const handleTarget = (sectionId: string) => {
+      if (sectionId === "session-resume") {
+        setIsSessionResumeExpanded(true);
+        setTimeout(() => {
+          document
+            .getElementById("session-resume-settings")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 100);
+      }
+    };
+
+    // Consume any pending navigation target requested before mount
+    const pending = consumeRequestedSettingsSection();
+    if (pending) {
+      handleTarget(pending);
+    }
+
+    // Consume the request here too, so it doesn't reopen the section on a
+    // later, unrelated mount.
+    const handleOpenSection = (e: Event) => {
+      consumeRequestedSettingsSection();
+      handleTarget((e as CustomEvent<string>).detail);
+    };
+    window.addEventListener(OPEN_SETTINGS_SECTION_EVENT, handleOpenSection);
+    return () => {
+      window.removeEventListener(OPEN_SETTINGS_SECTION_EVENT, handleOpenSection);
+    };
+  }, []);
 
   // Context value
   const contextValue: SettingsManagerContextValue = React.useMemo(
@@ -279,9 +313,8 @@ export const UnifiedSettingsManager: React.FC<UnifiedSettingsManagerProps> = ({
           <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
         </button>
 
-        {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-4 shrink-0">
-          <h2 className="text-xl font-semibold">{t("settingsManager.title")}</h2>
+        {/* Toolbar — the page title is rendered by the layout header above. */}
+        <div className="flex flex-wrap items-center justify-end gap-2 mb-4 shrink-0">
           <div className="flex items-center gap-2">
             <Button
               variant={activePanel === "diagnostics" ? "secondary" : "ghost"}
@@ -313,12 +346,21 @@ export const UnifiedSettingsManager: React.FC<UnifiedSettingsManagerProps> = ({
             error={error}
           />
         ) : (
-          <div className="flex flex-col gap-4 flex-1 min-h-0">
+          <div className="@container flex flex-col gap-4 flex-1 min-h-0">
             {/* Custom Directories — app-level setting, independent of Claude Code scope */}
             <Card className="shrink-0">
               <CustomDirectoriesSection
                 isExpanded={isCustomDirsExpanded}
                 onToggle={(open) => setIsCustomDirsExpanded(open)}
+                readOnly={serverReadOnly}
+              />
+            </Card>
+
+            {/* Session Resume Arguments — app-level setting, independent of Claude Code scope */}
+            <Card className="shrink-0" id="session-resume-settings">
+              <SessionResumeSection
+                isExpanded={isSessionResumeExpanded}
+                onToggle={(open) => setIsSessionResumeExpanded(open)}
                 readOnly={serverReadOnly}
               />
             </Card>
@@ -342,7 +384,10 @@ export const UnifiedSettingsManager: React.FC<UnifiedSettingsManagerProps> = ({
             </Card>
 
             {/* Claude Code Settings */}
-            <div className="flex flex-col md:flex-row gap-4 flex-1 min-h-0">
+            {/* Sidebar and editor stack until the *container* is wide enough
+                (≈672px), not the viewport — the pane sits beside the explorer
+                and sessions column, so viewport breakpoints lied here. */}
+            <div className="flex flex-col @2xl:flex-row gap-4 flex-1 min-h-0">
               {/* Left Sidebar */}
               <SettingsSidebar availableScopes={availableScopes} />
 

@@ -8,6 +8,8 @@
 export { groupAgentTasks } from "./agentTaskHelpers";
 export { groupAgentProgressMessages } from "./agentProgressHelpers";
 export { filterMessagesByCategory, getMessageUuidsByCategory } from "./messageCategories";
+export { classifyMessage, getMessageKind } from "./messageKinds";
+export type { MessageKind, MessageKindInfo } from "./messageKinds";
 export { applyMessageDisplayFilter } from "./messageDisplayFilter";
 export { collectModelChangeUuids } from "./modelChangeHelpers";
 export { groupTaskOperations } from "./taskOperationHelpers";

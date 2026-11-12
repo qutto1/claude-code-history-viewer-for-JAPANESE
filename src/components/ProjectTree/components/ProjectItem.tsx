@@ -12,7 +12,7 @@ import {
 } from "../../../utils/providers";
 import {
   getCompactParentPath,
-  getPathLeaf,
+  getProjectDisplayName,
   isAbsolutePath,
   isProjectPathUnavailable,
 } from "../../../utils/pathUtils";
@@ -27,6 +27,9 @@ export const ProjectItem: React.FC<ProjectItemProps> = ({
   onContextMenu,
   variant = "default",
   showProviderBadge = true,
+  providerSiblings = [],
+  onSelectSibling,
+  hasInlineChildren = true,
 }) => {
   const { t } = useTranslation();
 
@@ -35,6 +38,7 @@ export const ProjectItem: React.FC<ProjectItemProps> = ({
   const isGrouped = isMain || isWorktree;
   const isExpandable = project.session_count > 0;
   const isPathUnavailable = isProjectPathUnavailable(project);
+  const hasSiblings = providerSiblings.length > 0;
   const actualPath = project.actual_path || project.path || project.name;
 
   const providerId = getProviderId(project.provider);
@@ -47,20 +51,11 @@ export const ProjectItem: React.FC<ProjectItemProps> = ({
     : baseProviderLabel;
   const shouldShowParentPath = !isGrouped && isAbsolutePath(actualPath);
   const parentPath = shouldShowParentPath ? getCompactParentPath(actualPath) : "";
-  const shouldPreferPathLeaf =
-    providerId === "claude" ||
-    project.name === project.path ||
-    project.name === actualPath ||
-    isAbsolutePath(project.name) ||
-    project.name.startsWith("-");
-
   const displayName = isMain
     ? t("project.main", "main")
     : isWorktree
       ? getWorktreeLabel(project.actual_path)
-      : shouldPreferPathLeaf
-        ? getPathLeaf(actualPath) || project.name
-        : project.name;
+      : getProjectDisplayName({ ...project, provider: providerId });
 
   return (
     <button
@@ -70,7 +65,7 @@ export const ProjectItem: React.FC<ProjectItemProps> = ({
       data-project-path={project.path}
       aria-level={ariaLevel}
       aria-selected={isSelected}
-      aria-expanded={isExpandable ? isExpanded : undefined}
+      aria-expanded={isExpandable && hasInlineChildren ? isExpanded : undefined}
       tabIndex={-1}
       onClick={onClick}
       onKeyDown={(e) => {
@@ -80,6 +75,10 @@ export const ProjectItem: React.FC<ProjectItemProps> = ({
         } else if (e.key === "ArrowLeft" && isExpandable && isExpanded) {
           e.preventDefault();
           onToggle();
+        } else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+          // Keyboard route to the row menu (hide, copy path, switch provider).
+          e.preventDefault();
+          onContextMenu(e as unknown as React.MouseEvent);
         }
       }}
       onContextMenu={onContextMenu}
@@ -93,8 +92,8 @@ export const ProjectItem: React.FC<ProjectItemProps> = ({
           : "hover:bg-accent/8 hover:pl-5 border-l-2 border-transparent",
         !isGrouped && isExpanded && "bg-accent/10 border-l-accent pl-5",
         isGrouped && isMain && "hover:bg-accent/10",
-        isGrouped && isWorktree && "hover:bg-emerald-500/10",
-        isGrouped && isExpanded && (isMain ? "bg-accent/15" : "bg-emerald-500/15")
+        isGrouped && isWorktree && "hover:bg-success/10",
+        isGrouped && isExpanded && (isMain ? "bg-accent/15" : "bg-success/15")
       )}
     >
       {/* Expand Icon */}
@@ -104,7 +103,7 @@ export const ProjectItem: React.FC<ProjectItemProps> = ({
           "transition-all duration-200 p-0.5 -m-0.5 rounded",
           isExpanded
             ? isWorktree
-              ? "text-emerald-500"
+              ? "text-success"
               : "text-accent"
             : "text-muted-foreground"
         )}
@@ -128,7 +127,7 @@ export const ProjectItem: React.FC<ProjectItemProps> = ({
             <GitBranch
               className={cn(
                 "w-3.5 h-3.5 transition-colors",
-                isExpanded ? "text-emerald-500" : "text-emerald-600/60 dark:text-emerald-400/60"
+                isExpanded ? "text-success" : "text-success/60"
               )}
             />
           </span>
@@ -155,7 +154,7 @@ export const ProjectItem: React.FC<ProjectItemProps> = ({
             isGrouped ? "text-xs" : "text-sm",
             isExpanded
               ? isWorktree
-                ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                ? "text-success font-medium"
                 : isGrouped
                   ? "text-accent font-medium"
                   : "text-accent font-semibold"
@@ -172,10 +171,55 @@ export const ProjectItem: React.FC<ProjectItemProps> = ({
             {parentPath}
           </span>
         )}
+        {/* Several providers for one folder: chips get their own line so the
+            name keeps its width. Spans, not buttons — we are inside the
+            treeitem button. */}
+        {hasSiblings && (
+          <span className="mt-1 flex flex-wrap items-center gap-1">
+            <span
+              className={cn(
+                "px-1.5 py-0.5 text-2xs font-medium rounded-full leading-none",
+                getProviderBadgeStyle(providerId)
+              )}
+            >
+              {providerLabel}
+            </span>
+            {providerSiblings.map((sibling) => {
+              const siblingProvider = getProviderId(sibling.provider);
+              const siblingBase = getProviderLabel((key, fallback) => t(key, fallback), siblingProvider);
+              const siblingLabel = sibling.custom_directory_label
+                ? `${siblingBase} (${sibling.custom_directory_label})`
+                : siblingBase;
+              return (
+                <span
+                  key={sibling.path}
+                  role="button"
+                  tabIndex={-1}
+                  title={t("project.switchProvider", {
+                    provider: siblingLabel,
+                    count: sibling.session_count,
+                    defaultValue: "Open {{provider}} sessions ({{count}})",
+                  })}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSelectSibling?.(sibling);
+                  }}
+                  className={cn(
+                    "px-1.5 py-0.5 text-2xs font-medium rounded-full leading-none opacity-60 hover:opacity-100 transition-opacity",
+                    getProviderBadgeStyle(siblingProvider)
+                  )}
+                >
+                  {siblingLabel}
+                  <span className="ml-1 font-mono opacity-70">{sibling.session_count}</span>
+                </span>
+              );
+            })}
+          </span>
+        )}
       </span>
 
-      {/* Provider Badge */}
-      {showProviderBadge && (
+      {/* Single-provider folder: badge stays inline on the right */}
+      {showProviderBadge && !hasSiblings && (
         <span
           className={cn(
             "px-1.5 py-0.5 text-2xs font-medium rounded-full flex-shrink-0 leading-none",
@@ -194,7 +238,7 @@ export const ProjectItem: React.FC<ProjectItemProps> = ({
             path: actualPath,
             defaultValue: "Last-known location is unavailable: {{path}}",
           })}
-          className="flex-shrink-0 text-amber-600 dark:text-amber-400"
+          className="flex-shrink-0 text-warning"
         >
           <AlertCircle className="w-3.5 h-3.5" aria-hidden="true" />
         </span>

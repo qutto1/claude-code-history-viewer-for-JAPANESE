@@ -139,6 +139,37 @@ const dedupeSessionsById = (sessions: ClaudeSession[]): ClaudeSession[] => {
   return deduped;
 };
 
+/**
+ * Ask the backend whether a selected session that is not on the reloaded first
+ * page still exists. Returns the fresh session, or null when it is gone *or*
+ * the provider has no single-session lookup (only Claude does). Null leaves
+ * the selection to the caller's existing handling: `refreshAllConversations`
+ * clears it, the watcher and sidechain toggle keep it.
+ */
+const lookUpSessionBeyondPage = async (
+  provider: string,
+  project: ClaudeProject,
+  held: ClaudeSession,
+  excludeSidechain: boolean
+): Promise<ClaudeSession | null> => {
+  try {
+    const found = await api<ClaudeSession | null>("load_provider_session_by_path", {
+      provider,
+      projectPath: project.path,
+      filePath: held.file_path,
+      excludeSidechain,
+    });
+    // The list borrows summaries across sessions (leafUuid); a single-file
+    // lookup can't, so keep the one the row already showed. `||`: an empty
+    // summary counts as none.
+    return found && { ...found, summary: found.summary || held.summary };
+  } catch {
+    // Unsupported provider or a rejected path: fall back, don't surface an
+    // error for a list refresh that otherwise succeeded.
+    return null;
+  }
+};
+
 // ============================================================================
 // Helper
 // ============================================================================
@@ -563,6 +594,9 @@ export const createProjectSlice: StateCreator<
 
     const previouslySelectedProject = get().selectedProject;
     const previouslySelectedSession = get().selectedSession;
+    // Global stats can be open with a project still selected; the flag, not
+    // the selection, says what is on screen.
+    const wasViewingGlobalStats = get().isViewingGlobalStats;
 
     set({ isRefreshingAllConversations: true, error: null });
 
@@ -586,7 +620,10 @@ export const createProjectSlice: StateCreator<
         return;
       }
 
-      await get().selectProject(refreshedProject);
+      // Same project, so refresh its list without `selectProject`, which nulls
+      // `selectedSession` and would turn the re-select below into a fresh load
+      // (dropping the subagent stack, pagination and search) - see #508, #609.
+      await get().reloadProjectSessions(refreshedProject);
 
       let refreshedSession: ClaudeSession | null = null;
       if (previouslySelectedSession) {
@@ -612,7 +649,12 @@ export const createProjectSlice: StateCreator<
       }
 
       const refreshedState = get();
-      if (refreshedState.analytics.currentView === "tokenStats") {
+      if (wasViewingGlobalStats && refreshedState.analytics.currentView === "analytics") {
+        // Re-selecting the session above cleared the flag (App exits global
+        // stats on session change); restore it and reload the overview.
+        refreshedState.setViewingGlobalStats(true);
+        await refreshedState.loadGlobalStats();
+      } else if (refreshedState.analytics.currentView === "tokenStats") {
         await refreshedState.loadProjectTokenStats(refreshedProject.path);
         if (refreshedSession) {
           await refreshedState.loadSessionTokenStats(refreshedSession.file_path);
@@ -696,8 +738,9 @@ export const createProjectSlice: StateCreator<
    *
    * A matching session in the reloaded page replaces the held one, so its
    * message count and timestamps refresh in the list. A session that is *not*
-   * in the page is left selected rather than cleared: this is only the first
-   * page, so absence means "not on page 1", not "deleted".
+   * in the page is looked up on its own (absence from page 1 is not deletion):
+   * if it still exists it is appended to the list, otherwise it is left for
+   * the caller to handle (`refreshAllConversations` clears it).
    */
   reloadProjectSessions: async (project: ClaudeProject) => {
     const requestId = nextRequestId("selectProject");
@@ -731,8 +774,29 @@ export const createProjectSlice: StateCreator<
         return;
       }
 
+      const held = get().selectedSession;
+      // A subagent view selects the subagent's own file, which is never a list
+      // row; leave it as before rather than appending it to the sidebar.
+      const isSubagentView = get().parentSessionStack.length > 0;
+      const refreshed =
+        held == null
+          ? null
+          : isSubagentView
+          ? null
+          : page.sessions.find((session) => session.file_path === held.file_path) ??
+            (await lookUpSessionBeyondPage(provider, project, held, get().excludeSidechain));
+
+      if (requestId !== getRequestId("selectProject")) {
+        return;
+      }
+
+      // A session found beyond page 1 is appended so the open session stays
+      // visible; `loadMoreSessions` dedupes it when its own page arrives.
+      const nextSessions = dedupeSessionsById(
+        refreshed ? [...page.sessions, refreshed] : page.sessions
+      );
       set((state) => ({
-        sessions: page.sessions,
+        sessions: nextSessions,
         sessionsTotal: page.total,
         sessionsOffset: page.nextOffset,
         hasMoreSessions: page.hasMore,
@@ -741,7 +805,7 @@ export const createProjectSlice: StateCreator<
         sessionsByProject: {
           ...state.sessionsByProject,
           [project.path]: {
-            sessions: page.sessions,
+            sessions: nextSessions,
             total: page.total,
             offset: page.nextOffset,
             hasMore: page.hasMore,
@@ -750,15 +814,8 @@ export const createProjectSlice: StateCreator<
           },
         },
       }));
-
-      const held = get().selectedSession;
-      if (held) {
-        const refreshed = page.sessions.find(
-          (session) => session.file_path === held.file_path
-        );
-        if (refreshed) {
-          set({ selectedSession: refreshed });
-        }
+      if (refreshed && get().selectedSession?.file_path === refreshed.file_path) {
+        set({ selectedSession: refreshed });
       }
 
       // Update project's session_count to match actual loaded sessions
@@ -934,7 +991,14 @@ export const createProjectSlice: StateCreator<
         limit: SESSION_PAGE_LIMIT,
       });
 
-      if (requestId !== getRequestId("selectProject")) {
+      // A reload keeps the rows on screen and leaves `isLoadingSessions` false,
+      // so this can start mid-reload with the reload's id and the OLD offset.
+      // If the reload landed first, the list no longer ends at that offset and
+      // appending would skip the rows in between.
+      if (
+        requestId !== getRequestId("selectProject") ||
+        get().sessionsOffset !== sessionsOffset
+      ) {
         return;
       }
 

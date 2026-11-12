@@ -6,3 +6,4 @@ export { EnvVarsSection } from "./EnvVarsSection";
 export { CustomDirectoriesSection } from "./CustomDirectoriesSection";
 export { WslSection } from "./WslSection";
 export { AutoRefreshSection } from "./AutoRefreshSection";
+export { SessionResumeSection } from "./SessionResumeSection";

@@ -84,6 +84,8 @@ export interface UserSettings {
    * disables the filter.
    */
   environmentFilter?: string;
+  /** Custom extra CLI arguments per provider for session resumption (e.g. claude: "--dangerously-skip-permissions") */
+  resumeCliArgs?: Record<string, string>;
 }
 
 /** Root structure for all user metadata */

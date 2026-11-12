@@ -158,7 +158,28 @@ function generateMockMessages() {
   return messages;
 }
 
+const MOCK_MODEL = "claude-sonnet-4-20250514";
 const MOCK_MESSAGES = generateMockMessages();
+const MOCK_INPUT_TOKENS = 1200 * (MOCK_MESSAGES.length / 2);
+const MOCK_OUTPUT_TOKENS = 350 * (MOCK_MESSAGES.length / 2);
+const MOCK_TOTAL_TOKENS = MOCK_INPUT_TOKENS + MOCK_OUTPUT_TOKENS;
+const MOCK_TOKEN_DISTRIBUTION = {
+  input: MOCK_INPUT_TOKENS,
+  output: MOCK_OUTPUT_TOKENS,
+  cache_creation: 0,
+  cache_read: 0,
+  reasoning: 0,
+};
+const MOCK_MODEL_STATS = {
+  model_name: MOCK_MODEL,
+  provider_id: "claude",
+  message_count: MOCK_MESSAGES.length / 2,
+  token_count: MOCK_TOTAL_TOKENS,
+  input_tokens: MOCK_INPUT_TOKENS,
+  output_tokens: MOCK_OUTPUT_TOKENS,
+  cache_creation_tokens: 0,
+  cache_read_tokens: 0,
+};
 
 const MOCK_SESSION = {
   session_id: "mock-session-001",
@@ -291,7 +312,14 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
   load_provider_sessions: (args) => sessionsFor(args),
   load_provider_sessions_page: (args) => {
     const sessions = sessionsFor(args);
-    return { sessions, total: sessions.length, nextOffset: sessions.length, hasMore: false };
+    return {
+      sessions,
+      total: sessions.length,
+      offset: 0,
+      limit: 50,
+      nextOffset: sessions.length,
+      hasMore: false,
+    };
   },
   load_session_messages: () => [...MOCK_MESSAGES, ...EXTRA_MESSAGES],
   load_provider_messages: () => [...MOCK_MESSAGES, ...EXTRA_MESSAGES],
@@ -304,6 +332,7 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
       next_offset: messages.length,
     };
   },
+  get_session_subagents: () => [],
   search_messages: () => [],
   get_session_token_stats: () => ({
     total_input_tokens: 12000,
@@ -320,16 +349,46 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
     page_size: 20,
   }),
   get_project_stats_summary: () => ({
+    project_name: MOCK_PROJECT.name,
     total_sessions: 1,
     total_messages: MOCK_MESSAGES.length,
-    total_input_tokens: 12000,
-    total_output_tokens: 3500,
-    date_range: { start: "2026-03-07", end: "2026-03-10" },
+    total_tokens: MOCK_TOTAL_TOKENS,
+    avg_tokens_per_session: MOCK_TOTAL_TOKENS,
+    avg_session_duration: 30,
+    total_session_duration: 30,
+    most_active_hour: 14,
+    most_used_tools: [],
+    most_used_skills: [],
+    most_used_subagents: [],
+    daily_stats: [],
+    activity_heatmap: [],
+    model_distribution: [MOCK_MODEL_STATS],
+    token_distribution: MOCK_TOKEN_DISTRIBUTION,
   }),
   get_global_stats_summary: () => ({
     total_projects: 1,
     total_sessions: 1,
     total_messages: MOCK_MESSAGES.length,
+    total_tokens: MOCK_TOTAL_TOKENS,
+    total_session_duration_minutes: 30,
+    date_range: { start: "2026-03-07", end: "2026-03-10" },
+    token_distribution: MOCK_TOKEN_DISTRIBUTION,
+    daily_stats: [],
+    activity_heatmap: [],
+    most_used_tools: [],
+    most_used_skills: [],
+    most_used_subagents: [],
+    provider_distribution: [
+      {
+        provider_id: "claude",
+        session_count: 1,
+        message_count: MOCK_MESSAGES.length,
+        tokens: MOCK_TOTAL_TOKENS,
+        token_count: MOCK_TOTAL_TOKENS,
+      },
+    ],
+    model_distribution: [MOCK_MODEL_STATS],
+    top_projects: [],
   }),
   get_session_comparison: () => [],
   get_recent_edits: () => [],
@@ -348,7 +407,7 @@ const handlers: Record<string, (args: Record<string, unknown>) => unknown> = {
   },
   load_unified_presets: () => [],
   get_all_settings: () => ({
-    user: JSON.stringify({ cleanupPeriodDays: 30 }, null, 2),
+    user: JSON.stringify({ cleanupPeriodDays: 30, model: MOCK_MODEL }, null, 2),
     project: null,
     local: null,
     managed: null,

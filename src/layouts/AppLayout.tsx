@@ -34,7 +34,10 @@ import { MobileNavigatorSheet } from "@/components/mobile/MobileNavigatorSheet";
 import { Header } from "@/layouts/Header/Header";
 import { ModalContainer } from "@/layouts/Header/SettingDropdown/ModalContainer";
 import { DesktopOnly } from "@/contexts/platform";
-import { useIsXlUp } from "@/hooks/useMediaQuery";
+import { useIsLgUp, useIsXlUp } from "@/hooks/useMediaQuery";
+import { useResizablePanel } from "@/hooks/useResizablePanel";
+import { SessionsPane } from "@/components/SessionsPane/SessionsPane";
+import { formatTimeAgo } from "@/utils/time";
 import {
   AppErrorType,
   type ClaudeMessage,
@@ -241,6 +244,26 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
 
   // Called before the early returns below, as hook order must not vary.
   const isXlUp = useIsXlUp();
+  // Sessions get their own column from `lg` up; below that they stay inline in
+  // the explorer so narrow windows keep a usable transcript width. The column
+  // only exists for a selected project, and not on app-level views (Settings,
+  // Archive) where it would just steal width.
+  const showSessionsPane =
+    useIsLgUp() &&
+    !isMobile &&
+    selectedProject != null &&
+    !computed.isSettingsView &&
+    !computed.isArchiveView;
+  const {
+    width: sessionsPaneWidth,
+    isResizing: isSessionsPaneResizing,
+    handleMouseDown: handleSessionsPaneResizeStart,
+  } = useResizablePanel({
+    defaultWidth: 300,
+    minWidth: 220,
+    maxWidth: 520,
+    storageKey: "sessions-pane-width",
+  });
   const recentEditsDockStats = useAppStore((s) => s.recentEditsDock);
   const setRecentEditsMode = useAppStore((s) => s.setRecentEditsMode);
   const setRecentEditsDockOpen = useAppStore((s) => s.setRecentEditsDockOpen);
@@ -315,6 +338,10 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
     isViewingGlobalStats ||
     computed.isTokenStatsView
   );
+  // Global stats renders inside the analytics branch; the flag can linger
+  // while Settings/Archive are open from the app menu.
+  const showsGlobalStats =
+    isViewingGlobalStats && !computed.isSettingsView && !computed.isArchiveView;
   /*
     Gated on `xl` in JavaScript, not merely in CSS. The wrapper below is
     `hidden xl:block`, but a hidden wrapper still mounts its children, so
@@ -411,9 +438,17 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
               })}
             </a>
           )}
+          {showSessionsPane && (
+            <a
+              href="#sessions-pane"
+              className="absolute left-[13rem] top-[-40px] z-[700] rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-all focus:top-2"
+            >
+              {t("common.a11y.skipToSessions", { defaultValue: "Skip to sessions" })}
+            </a>
+          )}
           <a
             href="#main-content"
-            className="absolute left-52 top-[-40px] z-[700] rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-all focus:top-2"
+            className="absolute left-[24rem] top-[-40px] z-[700] rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-all focus:top-2"
           >
             {t("common.a11y.skipToMain", {
               defaultValue: "Skip to main content",
@@ -422,7 +457,7 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
           {showRecentEditsDock && (
             <a
               href="#recent-edits-dock"
-              className="absolute left-[35rem] top-[-40px] z-[700] hidden rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-all focus:top-2 xl:block"
+              className="absolute left-[47rem] top-[-40px] z-[700] hidden rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-all focus:top-2 xl:block"
             >
               {t("common.a11y.skipToRecentEdits", {
                 defaultValue: "Skip to recent edits",
@@ -440,7 +475,7 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
           {!isMobile && isTranscriptView && isNavigatorOpen && selectedSession && (
             <a
               href="#message-navigator"
-              className="absolute left-[23rem] top-[-40px] z-[700] rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-all focus:top-2"
+              className="absolute left-[35rem] top-[-40px] z-[700] rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-all focus:top-2"
             >
               {t("common.a11y.skipToNavigator", {
                 defaultValue: "Skip to message navigator",
@@ -530,6 +565,7 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
                 isLoading={isLoadingProjects || isLoadingSessions}
                 isLoadingMoreSessions={isLoadingMoreSessions}
                 isViewingGlobalStats={isViewingGlobalStats}
+                inlineSessions={!showSessionsPane}
                 width={isSidebarCollapsed ? undefined : sidebarWidth}
                 isResizing={isSidebarResizing}
                 onResizeStart={handleSidebarResizeStart}
@@ -550,6 +586,25 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
             </div>
           )}
 
+          {showSessionsPane && (
+            <SessionsPane
+              selectedProject={selectedProject}
+              sessions={sessions}
+              sessionsTotal={sessionsTotal}
+              hasMoreSessions={hasMoreSessions}
+              selectedSession={selectedSession}
+              isLoading={isLoadingSessions}
+              isLoadingMoreSessions={isLoadingMoreSessions}
+              onSessionSelect={handleSessionSelect}
+              onSessionHover={handleSessionHover}
+              onLoadMoreSessions={loadMoreSessions}
+              formatTimeAgo={formatTimeAgo}
+              width={sessionsPaneWidth}
+              isResizing={isSessionsPaneResizing}
+              onResizeStart={handleSessionsPaneResizeStart}
+            />
+          )}
+
           {/* Main Content Area */}
           <main
             id="main-content"
@@ -563,11 +618,11 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
               computed.isSettingsView ||
               computed.isBoardView ||
               computed.isArchiveView ||
-              (isViewingGlobalStats && !computed.isSettingsView)) && (
+              showsGlobalStats) && (
               <div className="px-4 py-3 md:px-6 md:py-4 border-b border-border/50 bg-card/50">
                 <div className="flex items-center gap-3">
                   <div className="w-9 h-9 rounded-lg bg-accent/10 flex items-center justify-center">
-                    {isViewingGlobalStats ? (
+                    {showsGlobalStats ? (
                       <Database className="w-5 h-5 text-accent" />
                     ) : computed.isArchiveView ? (
                       <Archive className="w-5 h-5 text-accent" />
@@ -585,7 +640,7 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
                   </div>
                   <div>
                     <h2 className="text-sm font-semibold text-foreground">
-                      {isViewingGlobalStats
+                      {showsGlobalStats
                         ? t("analytics.globalOverview")
                         : computed.isArchiveView
                           ? t("archive.title")
@@ -600,7 +655,7 @@ export const AppLayout: React.FC<AppLayoutProps> = (props) => {
                                 : t("messages.tokenStats.title")}
                     </h2>
                     <p className="text-xs text-muted-foreground">
-                      {isViewingGlobalStats
+                      {showsGlobalStats
                         ? globalOverviewDescription
                         : computed.isArchiveView
                           ? t("archive.description")
