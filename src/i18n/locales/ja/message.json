@@ -103,6 +103,7 @@
   "filter.content.commands": "コマンド",
   "filter.content.parallelTasks": "並列タスク",
   "filter.content.compactSummary": "圧縮コンテキスト",
+  "filter.content.system": "システム・その他",
   "filter.reset": "フィルターをリセット",
   "filter.active": "フィルター有効",
   "filter.showing": "{{filtered}} / {{total}}"

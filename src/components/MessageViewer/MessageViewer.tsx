@@ -184,6 +184,10 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
     () => messages.some((msg) => msg.type === "user" && msg.isCompactSummary),
     [messages],
   );
+  const hasSystemMessages = useMemo(
+    () => messages.some((msg) => msg.type !== "user" && msg.type !== "assistant"),
+    [messages],
+  );
 
   // Apply role + content type filters
   const displayMessages = useMemo(
@@ -1052,6 +1056,7 @@ export const MessageViewer: React.FC<MessageViewerProps> = ({
           filteredCount={displayMessages.length}
           hasParallelTasks={hasParallelTasks}
           hasCompactSummary={hasCompactSummary}
+          hasSystemMessages={hasSystemMessages}
         />
       )}
 

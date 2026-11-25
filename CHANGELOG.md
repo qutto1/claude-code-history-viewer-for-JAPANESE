@@ -11,6 +11,16 @@ listed first. Every entry without a `-fork` suffix is upstream
 `jhlee0409/claude-code-history-viewer` and is left exactly as upstream wrote it; a version
 number appearing in the fork entries does not imply an upstream release of the same number.
 
+## [1.32.2-fork.4] - 2026-11-26
+
+Fork release: the message viewer's filter can now hide system and other internal rows.
+
+### Added
+- **A "System & Other" filter in the message viewer** — newer Claude Code builds write internal records such as `api-request-blob` (a raw copy of the API payload, holding tool results, pending tool calls and "Environment update" text), `attachment`, `system` and `summary`. They are neither user nor assistant messages, so none of the existing role or content toggles reached them and they stayed on screen even with every filter off. The new toggle hides all of them at once. It is on by default (nothing changes until it is turned off), appears when the session contains such rows (and stays reachable while it is off), is saved with the other filters, and counts as an active filter. Filters saved by an older version load with it on.
+
+### Known limits
+- The content toggles (text, thinking, tool calls, commands) still apply to assistant messages only, so user-role rows such as tool results remain visible while the user role is on. Turn the user role off, or "System & Other" off for the raw API copies.
+
 ## [1.32.2-fork.3] - 2026-11-12
 
 Fork release: message search gets a date filter, and its results stop saying "no preview".

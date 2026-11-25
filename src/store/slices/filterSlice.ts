@@ -14,6 +14,13 @@ export interface MessageFilterContentTypes {
     commands: boolean;
     parallelTasks: boolean;
     compactSummary: boolean;
+    /**
+     * Every row whose `type` is neither user nor assistant: system notices,
+     * attachments, summaries and the raw `api-request-blob` payloads newer
+     * Claude Code builds write. They carry no chat turn of their own, so the
+     * role and text/tool toggles can never reach them.
+     */
+    system: boolean;
 }
 
 export interface MessageFilter {
@@ -32,6 +39,7 @@ const defaultMessageFilter = (): MessageFilter => ({
         commands: true,
         parallelTasks: true,
         compactSummary: true,
+        system: true,
     },
 });
 
@@ -88,6 +96,9 @@ const loadPersistedMessageFilter = (): MessageFilter => {
                 compactSummary: isBool(contentTypes.compactSummary)
                     ? contentTypes.compactSummary
                     : fallback.contentTypes.compactSummary,
+                system: isBool(contentTypes.system)
+                    ? contentTypes.system
+                    : fallback.contentTypes.system,
             },
         };
     } catch {
@@ -209,6 +220,7 @@ export const createFilterSlice: StateCreator<
         return !roles.user || !roles.assistant
             || !contentTypes.text || !contentTypes.thinking
             || !contentTypes.toolCalls || !contentTypes.commands
-            || !contentTypes.parallelTasks || !contentTypes.compactSummary;
+            || !contentTypes.parallelTasks || !contentTypes.compactSummary
+            || !contentTypes.system;
     },
 });

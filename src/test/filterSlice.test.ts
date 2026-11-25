@@ -92,6 +92,30 @@ describe("filterSlice message-filter persistence", () => {
     expect(store.getState().isMessageFilterActive()).toBe(true);
   });
 
+  it("shows system rows when loading filters saved before the system filter existed", () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      roles: { user: true, assistant: true },
+      contentTypes: {
+        text: true,
+        thinking: true,
+        toolCalls: true,
+        commands: true,
+        parallelTasks: true,
+        compactSummary: true,
+      },
+    }));
+
+    expect(makeStore().getState().messageFilter.contentTypes.system).toBe(true);
+  });
+
+  it("persists a system toggle and counts it as an active filter", () => {
+    const store = makeStore();
+    store.getState().toggleContentType("system");
+    expect(store.getState().messageFilter.contentTypes.system).toBe(false);
+    expect(readSaved().contentTypes.system).toBe(false);
+    expect(store.getState().isMessageFilterActive()).toBe(true);
+  });
+
   it("resetMessageFilter restores defaults and persists them", () => {
     const store = makeStore();
     store.getState().toggleRole("user");
@@ -112,6 +136,7 @@ describe("filterSlice message-filter persistence", () => {
         commands: true,
         parallelTasks: true,
         compactSummary: true,
+        system: true,
       },
     });
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ roles: { user: "nope" } }));

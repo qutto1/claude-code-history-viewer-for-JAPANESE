@@ -17,7 +17,8 @@ export function applyMessageDisplayFilter(
 ): ClaudeMessage[] {
   const { roles, contentTypes } = messageFilter;
   const allRoles = roles.user && roles.assistant;
-  const allContent = contentTypes.text && contentTypes.thinking && contentTypes.toolCalls && contentTypes.commands;
+  const allContent = contentTypes.text && contentTypes.thinking && contentTypes.toolCalls && contentTypes.commands
+    && contentTypes.system;
   const parallelTaskFilteredMessages = filterMessagesByCategory(
     messages,
     "parallel-task",
@@ -60,6 +61,8 @@ export function applyMessageDisplayFilter(
       }
       return true;
     }
-    return true; // system/summary/other
+    // system / summary / attachment / api-request-blob / ...: not a chat turn,
+    // so the role and content-type toggles don't apply — only "system" does.
+    return contentTypes.system;
   });
 }

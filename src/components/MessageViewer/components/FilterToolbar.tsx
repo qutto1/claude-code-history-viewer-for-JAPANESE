@@ -1,4 +1,4 @@
-import { Filter, RotateCcw, User, Bot, MessageSquareText, Brain, Wrench, Terminal, Zap, Archive } from "lucide-react";
+import { Filter, RotateCcw, User, Bot, MessageSquareText, Brain, Wrench, Terminal, Zap, Archive, Cog } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "../../../store/useAppStore";
@@ -35,9 +35,11 @@ interface FilterToolbarProps {
   filteredCount: number;
   hasParallelTasks: boolean;
   hasCompactSummary: boolean;
+  /** True when the session holds rows that are neither user nor assistant turns. */
+  hasSystemMessages: boolean;
 }
 
-export function FilterToolbar({ totalCount, filteredCount, hasParallelTasks, hasCompactSummary }: FilterToolbarProps) {
+export function FilterToolbar({ totalCount, filteredCount, hasParallelTasks, hasCompactSummary, hasSystemMessages }: FilterToolbarProps) {
   const { t } = useTranslation();
   const {
     messageFilter,
@@ -126,6 +128,15 @@ export function FilterToolbar({ totalCount, filteredCount, hasParallelTasks, has
             onClick={() => toggleContentType("compactSummary")}
             label={t("filter.content.compactSummary")}
             icon={<Archive className="w-3 h-3" />}
+          />
+        )}
+        {/* Also shown while the filter is off, so a hidden session can't strand it. */}
+        {(hasSystemMessages || !messageFilter.contentTypes.system) && (
+          <FilterToggle
+            active={messageFilter.contentTypes.system}
+            onClick={() => toggleContentType("system")}
+            label={t("filter.content.system")}
+            icon={<Cog className="w-3 h-3" />}
           />
         )}
       </div>
