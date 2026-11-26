@@ -48,6 +48,7 @@ use self::state::AppState;
 /// This list must stay in sync with the POST routes registered on `protected_api`
 /// in `build_router`; the `read_only_*` tests below pin the current classification.
 const READ_ONLY_ALLOWED_API_PATHS: &[&str] = &[
+    "/cancel_search",
     "/detect_claude_config_dir",
     "/detect_providers",
     "/export_session",
@@ -222,6 +223,7 @@ pub fn build_router(
         )
         .route("/get_session_subagents", post(h::get_session_subagents))
         .route("/search_messages", post(h::search_messages))
+        .route("/cancel_search", post(h::cancel_search))
         .route("/get_recent_edits", post(h::get_recent_edits))
         .route("/restore_file", post(h::restore_file))
         .route("/read_restore_target", post(h::read_restore_target))
@@ -1211,6 +1213,53 @@ mod tests {
                 ("get_global_stats_summary tokens, no claudePath", Some(100)),
             ]
         );
+    }
+
+    /// `/cancel_search` and both search routes take the cancel keys in
+    /// camelCase (`cancelGroup`, `cancelSeq`), as the Tauri commands do, and
+    /// a cancel stops searches up to its seq only — also in read-only mode.
+    #[tokio::test]
+    #[serial]
+    async fn test_cancel_search_route_stops_searches_up_to_its_seq() {
+        let home = crate::test_utils::SandboxHome::new();
+        let project = home.path().join(".claude").join("projects").join("p");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("s1.jsonl"),
+            history_row("s1", "u1", Some("needle-cancel-route"), 0),
+        )
+        .unwrap();
+
+        let (status, json) = post_read_only(
+            "cancel_search",
+            serde_json::json!({ "cancelGroup": "http-cancel", "cancelSeq": 4 }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{json}");
+
+        let claude_only = serde_json::json!(["claude"]);
+        for (route, seq, expected) in [
+            ("search_messages", 4, Err(())),
+            ("search_all_providers", 4, Err(())),
+            ("search_messages", 5, Ok(1)),
+            ("search_all_providers", 6, Ok(1)),
+        ] {
+            let body = serde_json::json!({
+                "claudePath": "", "query": "needle-cancel-route", "filters": {},
+                "activeProviders": claude_only,
+                "cancelGroup": "http-cancel", "cancelSeq": seq,
+            });
+            let (status, json) = post_read_only(route, body).await;
+            match expected {
+                Ok(count) => {
+                    assert_eq!(status, StatusCode::OK, "{route} seq {seq}: {json}");
+                    assert_eq!(json.as_array().map(Vec::len), Some(count), "{route}");
+                }
+                Err(()) => {
+                    assert_eq!(json["error"], "search cancelled", "{route} seq {seq}");
+                }
+            }
+        }
     }
 
     /// The session routes stay inside the history root as the stats routes

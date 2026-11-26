@@ -177,12 +177,18 @@ async fn project_sessions(claude: &Path, name: &str) -> Result<Vec<usize>, Strin
 
 /// The sessions search finds `query` in, sorted.
 async fn found(claude: &Path, query: &str) -> Result<Vec<String>, String> {
-    let mut sessions: Vec<String> =
-        search_messages(text(claude), query.to_string(), serde_json::json!({}), None)
-            .await?
-            .into_iter()
-            .map(|message| message.session_id)
-            .collect();
+    let mut sessions: Vec<String> = search_messages(
+        text(claude),
+        query.to_string(),
+        serde_json::json!({}),
+        None,
+        None,
+        None,
+    )
+    .await?
+    .into_iter()
+    .map(|message| message.session_id)
+    .collect();
     sessions.sort();
     sessions.dedup();
     Ok(sessions)

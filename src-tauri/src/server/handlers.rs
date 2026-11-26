@@ -316,6 +316,17 @@ pub struct SearchParams {
     pub filters: Value,
     #[serde(default)]
     pub limit: Option<usize>,
+    #[serde(default)]
+    pub cancel_group: Option<String>,
+    #[serde(default)]
+    pub cancel_seq: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelSearchParams {
+    pub cancel_group: String,
+    pub cancel_seq: u64,
 }
 
 #[derive(Deserialize)]
@@ -596,6 +607,10 @@ pub struct SearchAllProvidersParams {
     pub wsl_enabled: Option<bool>,
     #[serde(default)]
     pub wsl_excluded_distros: Option<Vec<String>>,
+    #[serde(default)]
+    pub cancel_group: Option<String>,
+    #[serde(default)]
+    pub cancel_seq: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -769,7 +784,23 @@ handler_json!(
     SearchParams,
     |p: SearchParams| async move {
         require_claude_base(&p.claude_path)?;
-        commands::session::search_messages(p.claude_path, p.query, p.filters, p.limit).await
+        commands::session::search_messages(
+            p.claude_path,
+            p.query,
+            p.filters,
+            p.limit,
+            p.cancel_group,
+            p.cancel_seq,
+        )
+        .await
+    }
+);
+
+handler_json!(
+    cancel_search,
+    CancelSearchParams,
+    |p: CancelSearchParams| async move {
+        commands::session::cancel_search(p.cancel_group, p.cancel_seq).await
     }
 );
 
@@ -1268,6 +1299,8 @@ handler_json!(
             p.custom_claude_paths,
             p.wsl_enabled,
             p.wsl_excluded_distros,
+            p.cancel_group,
+            p.cancel_seq,
         )
         .await
     }

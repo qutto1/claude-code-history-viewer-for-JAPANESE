@@ -376,6 +376,8 @@ fn bench_search_messages(c: &mut Criterion) {
                         black_box(q.to_string()),
                         black_box(serde_json::json!({})),
                         None,
+                        None,
+                        None,
                     )
                     .await
                 })

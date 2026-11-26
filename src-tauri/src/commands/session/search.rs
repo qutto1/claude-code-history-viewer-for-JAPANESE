@@ -14,7 +14,8 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 use uuid::Uuid;
 
@@ -32,10 +33,114 @@ const SEARCH_CACHE_CAPACITY: usize = 64;
 /// memory bounded.
 const MAX_CACHED_MATCHES_PER_QUERY: usize = 10_000;
 
+/// Error a cancelled search returns. `search_all_providers` matches on it to
+/// stop at once instead of logging it and moving on to the next provider.
+pub const SEARCH_CANCELLED: &str = "search cancelled";
+
+/// Cancel groups remembered at once. A group pushed out of the table only
+/// misses cancels sent after that: a running search keeps its own counter.
+const CANCEL_GROUP_CAPACITY: usize = 256;
+
+/// Longest cancel group name kept in the table (the frontend sends about 50
+/// bytes), so a client cannot make the table hold huge keys.
+const MAX_CANCEL_GROUP_LEN: usize = 128;
+
+/// Lines scanned between two cancel checks inside one file.
+const CANCEL_CHECK_INTERVAL: usize = 256;
+
+/// Files written more than this long before a date range starts are not
+/// read: the newest message of a session file is never newer than its mtime
+/// by more than a minute (measured over 20,712 files), so such a file has no
+/// message in the range.
+const PREFILTER_MTIME_MARGIN_HOURS: i64 = 1;
+
 lazy_static::lazy_static! {
     static ref ERROR_MATCHER: AhoCorasick = build_matcher("error");
     static ref SEARCH_CACHE: Mutex<LruCache<u64, CachedQuerySearch>> =
         Mutex::new(LruCache::new(NonZeroUsize::new(SEARCH_CACHE_CAPACITY).expect("non-zero")));
+    static ref CANCEL_GROUPS: Mutex<LruCache<String, Arc<AtomicU64>>> =
+        Mutex::new(LruCache::new(NonZeroUsize::new(CANCEL_GROUP_CAPACITY).expect("non-zero")));
+}
+
+/// Lets a newer search, or an explicit `cancel_search`, stop an older search
+/// of the same group.
+///
+/// Commands may arrive in any order, so a group keeps only the highest value
+/// it has seen: a search raises it to its own seq, a cancel of seq `n` raises
+/// it to `n + 1`, and a search stays live while the value equals its seq.
+/// A late cancel therefore never stops a newer search, and a search that
+/// arrives after a newer one (or after its own cancel) starts cancelled.
+#[derive(Clone)]
+pub struct SearchCancelToken {
+    latest: Arc<AtomicU64>,
+    seq: u64,
+}
+
+impl SearchCancelToken {
+    /// Register a search as the newest of its group. Without both a group
+    /// and a seq, or with a group longer than `MAX_CANCEL_GROUP_LEN`, there
+    /// is no token, and the search is never cancelled.
+    pub fn begin(group: Option<&str>, seq: Option<u64>) -> Option<Self> {
+        let (group, seq) = (group?, seq?);
+        let latest = cancel_group_counter(group)?;
+        latest.fetch_max(seq, Ordering::AcqRel);
+        Some(Self { latest, seq })
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.latest.load(Ordering::Acquire) > self.seq
+    }
+}
+
+fn is_cancelled(token: Option<&SearchCancelToken>) -> bool {
+    token.is_some_and(SearchCancelToken::is_cancelled)
+}
+
+/// `Err(SEARCH_CANCELLED)` once the search holding `token` is stale.
+pub fn ensure_search_active(token: Option<&SearchCancelToken>) -> Result<(), String> {
+    if is_cancelled(token) {
+        Err(SEARCH_CANCELLED.to_string())
+    } else {
+        Ok(())
+    }
+}
+
+/// The group's counter, created at 0 on first use. Tokens hold their own
+/// `Arc`, so evicting a group never touches a running search. A group longer
+/// than `MAX_CANCEL_GROUP_LEN` has no counter and never enters the table.
+fn cancel_group_counter(group: &str) -> Option<Arc<AtomicU64>> {
+    if group.len() > MAX_CANCEL_GROUP_LEN {
+        return None;
+    }
+    let mut groups = CANCEL_GROUPS.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(counter) = groups.get(group) {
+        return Some(Arc::clone(counter));
+    }
+    let counter = Arc::new(AtomicU64::new(0));
+    groups.put(group.to_string(), Arc::clone(&counter));
+    Some(counter)
+}
+
+/// Stop every search of `group` whose seq is `seq` or lower. (`u64::MAX`
+/// saturates and cannot be cancelled; the frontend's seqs never get there.)
+/// A group too long to have searches at all is left alone.
+pub(crate) fn cancel_search_group(group: &str, seq: u64) {
+    if let Some(counter) = cancel_group_counter(group) {
+        counter.fetch_max(seq.saturating_add(1), Ordering::AcqRel);
+    }
+}
+
+/// Stop the searches of `cancel_group` started with a seq up to `cancel_seq`
+/// (the frontend calls this when the query it was typing has moved on).
+#[tauri::command]
+pub async fn cancel_search(cancel_group: String, cancel_seq: u64) -> Result<(), String> {
+    if cancel_group.len() > MAX_CANCEL_GROUP_LEN {
+        return Err(format!(
+            "cancel group is longer than {MAX_CANCEL_GROUP_LEN} bytes"
+        ));
+    }
+    cancel_search_group(&cancel_group, cancel_seq);
+    Ok(())
 }
 
 /// (size, mtime) identity of a session file, captured BEFORE scanning so a
@@ -149,20 +254,35 @@ fn extract_project_name(file_path: &PathBuf) -> Option<String> {
 ///
 /// Uses a reusable buffer to avoid repeated heap allocations during JSON parsing.
 /// Accepts a pre-built `AhoCorasick` matcher to avoid rebuilding per file.
+///
+/// A row without a timestamp takes `fallback_timestamp` (the file's mtime
+/// from its signature) so the date pre-filter, which judges a file by that
+/// mtime, can never disagree with the date filter about it; only a file whose
+/// mtime could not be read falls back to "now".
+///
+/// Returns `None` when `cancel` turns stale mid-file: a partly read file must
+/// never be taken for a complete one.
 #[allow(unsafe_code)] // Required for mmap performance optimization
-fn search_in_file(file_path: &PathBuf, matcher: &AhoCorasick) -> Vec<ClaudeMessage> {
+fn search_in_file(
+    file_path: &PathBuf,
+    matcher: &AhoCorasick,
+    fallback_timestamp: Option<SystemTime>,
+    cancel: Option<&SearchCancelToken>,
+) -> Option<Vec<ClaudeMessage>> {
     let project_name = extract_project_name(file_path);
+    let fallback_timestamp =
+        fallback_timestamp.map(|mtime| DateTime::<Utc>::from(mtime).to_rfc3339());
 
     let file = match fs::File::open(file_path) {
         Ok(f) => f,
-        Err(_) => return Vec::new(),
+        Err(_) => return Some(Vec::new()),
     };
 
     // SAFETY: We're only reading the file, and the file handle is kept open
     // for the duration of the mmap's lifetime. Session files are append-only.
     let mmap = match unsafe { Mmap::map(&file) } {
         Ok(m) => m,
-        Err(_) => return Vec::new(),
+        Err(_) => return Some(Vec::new()),
     };
 
     // Use SIMD-accelerated line detection
@@ -175,6 +295,14 @@ fn search_in_file(file_path: &PathBuf, matcher: &AhoCorasick) -> Vec<ClaudeMessa
     let mut parse_buffer = Vec::with_capacity(PARSE_BUFFER_INITIAL_CAPACITY);
 
     for (line_num, (start, end)) in line_ranges.iter().enumerate() {
+        if line_num % CANCEL_CHECK_INTERVAL == 0 {
+            #[cfg(test)]
+            run_cancel_check_hook(file_path, line_num);
+            if is_cancelled(cancel) {
+                return None;
+            }
+        }
+
         // Reuse buffer instead of allocating new Vec each iteration
         parse_buffer.clear();
         parse_buffer.extend_from_slice(&mmap[*start..*end]);
@@ -230,9 +358,11 @@ fn search_in_file(file_path: &PathBuf, matcher: &AhoCorasick) -> Vec<ClaudeMessa
             session_id: log_entry
                 .session_id
                 .unwrap_or_else(|| "unknown-session".to_string()),
-            timestamp: log_entry
-                .timestamp
-                .unwrap_or_else(|| Utc::now().to_rfc3339()),
+            timestamp: log_entry.timestamp.unwrap_or_else(|| {
+                fallback_timestamp
+                    .clone()
+                    .unwrap_or_else(|| Utc::now().to_rfc3339())
+            }),
             message_type: log_entry.message_type,
             content: Some(message_content.content.clone()),
             project_name: project_name.clone(),
@@ -267,7 +397,7 @@ fn search_in_file(file_path: &PathBuf, matcher: &AhoCorasick) -> Vec<ClaudeMessa
         results.push(claude_message);
     }
 
-    results
+    Some(results)
 }
 
 /// Default limit for search results
@@ -391,18 +521,12 @@ fn matches_filters(message: &ClaudeMessage, filters: &serde_json::Value) -> bool
         }
     }
 
-    if let Some(projects) = obj.get("projects").and_then(serde_json::Value::as_array) {
-        let selected: Vec<&str> = projects
-            .iter()
-            .filter_map(serde_json::Value::as_str)
-            .collect();
-        if !selected.is_empty() {
-            let Some(project_name) = message.project_name.as_deref() else {
-                return false;
-            };
-            if !selected.contains(&project_name) {
-                return false;
-            }
+    if let Some(selected) = selected_projects(filters) {
+        let Some(project_name) = message.project_name.as_deref() else {
+            return false;
+        };
+        if !selected.contains(&project_name) {
+            return false;
         }
     }
 
@@ -432,26 +556,96 @@ fn matches_filters(message: &ClaudeMessage, filters: &serde_json::Value) -> bool
         }
     }
 
-    if let Some(date_range) = obj.get("dateRange").and_then(serde_json::Value::as_array) {
-        if date_range.len() == 2 {
-            let start = parse_filter_date(&date_range[0]);
-            let end = parse_filter_date(&date_range[1]);
-            match (start, end) {
-                (Some(start_at), Some(end_at)) => {
-                    let message_ts = DateTime::parse_from_rfc3339(&message.timestamp)
-                        .ok()
-                        .map(|dt| dt.with_timezone(&Utc));
-                    match message_ts {
-                        Some(ts) if ts >= start_at && ts <= end_at => {}
-                        _ => return false,
-                    }
-                }
-                (None, _) | (_, None) => return false,
-            }
+    if let Some((start, end)) = date_range_bounds(filters) {
+        let (Some(start_at), Some(end_at)) = (start, end) else {
+            return false;
+        };
+        let message_ts = DateTime::parse_from_rfc3339(&message.timestamp)
+            .ok()
+            .map(|dt| dt.with_timezone(&Utc));
+        match message_ts {
+            Some(ts) if ts >= start_at && ts <= end_at => {}
+            _ => return false,
         }
     }
 
     true
+}
+
+/// The projects a search is narrowed to: `None` unless `projects` holds at
+/// least one string. Shared by `matches_filters` and the pre-filter so the
+/// two can never read the filter differently.
+fn selected_projects(filters: &serde_json::Value) -> Option<Vec<&str>> {
+    let projects = filters.get("projects")?.as_array()?;
+    let selected: Vec<&str> = projects
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    (!selected.is_empty()).then_some(selected)
+}
+
+/// `[start, end]` of a date range; a bound that does not parse is `None`.
+type DateRangeBounds = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
+
+/// The parsed `[start, end]` of an active date range (an array of exactly two
+/// items); either bound is `None` when it does not parse, which rejects every
+/// message. Shared by `matches_filters` and the pre-filter.
+fn date_range_bounds(filters: &serde_json::Value) -> Option<DateRangeBounds> {
+    let date_range = filters.get("dateRange")?.as_array()?;
+    (date_range.len() == 2).then(|| {
+        (
+            parse_filter_date(&date_range[0]),
+            parse_filter_date(&date_range[1]),
+        )
+    })
+}
+
+/// Decides, before any read, which uncached files cannot add a single
+/// message to the filtered result, so they are not read at all.
+///
+/// It reads the filters through the same helpers as `matches_filters`:
+/// - project: every message of a file carries `extract_project_name(path)`
+///   (set in `search_in_file`), so a file outside the selection is filtered
+///   out row by row anyway.
+/// - date: a file written more than `PREFILTER_MTIME_MARGIN_HOURS` before the
+///   range starts has no message in it (rows without a timestamp take that
+///   same mtime). An unparsable end rejects every message regardless.
+///
+/// A file whose signature or mtime is unknown is always read. A skipped file
+/// keeps no cache entry, so a later, wider search reads it.
+struct ScanPrefilter<'a> {
+    projects: Option<Vec<&'a str>>,
+    written_before_cutoff: Option<SystemTime>,
+}
+
+impl<'a> ScanPrefilter<'a> {
+    fn new(filters: &'a serde_json::Value) -> Self {
+        let written_before_cutoff = date_range_bounds(filters)
+            .and_then(|(start, _)| start)
+            .and_then(|start| {
+                start.checked_sub_signed(chrono::Duration::hours(PREFILTER_MTIME_MARGIN_HOURS))
+            })
+            .map(SystemTime::from);
+        Self {
+            projects: selected_projects(filters),
+            written_before_cutoff,
+        }
+    }
+
+    fn excludes(&self, path: &PathBuf, signature: Option<FileSignature>) -> bool {
+        let Some(mtime) = signature.and_then(|signature| signature.mtime) else {
+            return false;
+        };
+        if let Some(projects) = &self.projects {
+            let in_selection =
+                extract_project_name(path).is_some_and(|name| projects.contains(&name.as_str()));
+            if !in_selection {
+                return true;
+            }
+        }
+        self.written_before_cutoff
+            .is_some_and(|cutoff| mtime < cutoff)
+    }
 }
 
 pub fn apply_search_filters(
@@ -470,15 +664,35 @@ pub fn apply_search_filters(
 /// pool. Search is the one command a user is most likely to fire repeatedly,
 /// and holding the runtime meant each keystroke-triggered search froze
 /// everything else until it finished.
+///
+/// With both `cancel_group` and `cancel_seq`, the search becomes the newest of
+/// its group and stops with `Err(SEARCH_CANCELLED)` once a newer search or a
+/// `cancel_search` reaches its seq (see [`SearchCancelToken`]).
 #[tauri::command]
 pub async fn search_messages(
     claude_path: String,
     query: String,
     filters: serde_json::Value,
     limit: Option<usize>,
+    cancel_group: Option<String>,
+    cancel_seq: Option<u64>,
+) -> Result<Vec<ClaudeMessage>, String> {
+    let cancel = SearchCancelToken::begin(cancel_group.as_deref(), cancel_seq);
+    search_messages_with_cancel(claude_path, query, filters, limit, cancel).await
+}
+
+/// `search_messages` under a token its caller already registered, so a
+/// command that searches several roots (`search_all_providers`) checks one
+/// token instead of advancing its group once per root.
+pub(crate) async fn search_messages_with_cancel(
+    claude_path: String,
+    query: String,
+    filters: serde_json::Value,
+    limit: Option<usize>,
+    cancel: Option<SearchCancelToken>,
 ) -> Result<Vec<ClaudeMessage>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        search_messages_blocking(claude_path, query, filters, limit)
+        search_messages_blocking(claude_path, query, filters, limit, cancel.as_ref())
     })
     .await
     .map_err(|e| format!("Task join error: {e}"))?
@@ -486,15 +700,22 @@ pub async fn search_messages(
 
 /// The search itself. Separate from the command so the body stays at one indent
 /// level and the wrapper above is the only thing that had to change.
+///
+/// A cancelled search returns `Err(SEARCH_CANCELLED)` and never stores
+/// anything: the token is checked once more just before the cache is
+/// written, never after, so a search either stores complete matches and
+/// answers, or is cancelled and leaves the cache untouched.
 fn search_messages_blocking(
     claude_path: String,
     query: String,
     filters: serde_json::Value,
     limit: Option<usize>,
+    cancel: Option<&SearchCancelToken>,
 ) -> Result<Vec<ClaudeMessage>, String> {
     #[cfg(debug_assertions)]
     let start_time = std::time::Instant::now();
 
+    ensure_search_active(cancel)?;
     let max_results = limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
     validate_search_filters(&filters)?;
 
@@ -511,63 +732,118 @@ fn search_messages_blocking(
     // Regular files only, no symlink followed (`session_files`): a linked
     // `*.jsonl` entry would be read wherever it points, and a FIFO named
     // like a session would block the search.
+    #[cfg(debug_assertions)]
+    let walk_start = std::time::Instant::now();
     let file_paths: Vec<PathBuf> = session_files::regular_session_files(&projects_path);
+    #[cfg(debug_assertions)]
+    let walk_ms = walk_start.elapsed().as_millis();
+    ensure_search_active(cancel)?;
 
+    #[cfg(debug_assertions)]
+    let cache_load_start = std::time::Instant::now();
     let key = cache_key(&claude_path, &query);
     let cached_files: HashMap<PathBuf, FileMatches> = SEARCH_CACHE
         .lock()
         .ok()
         .and_then(|mut cache| cache.get(&key).map(|entry| entry.files.clone()))
         .unwrap_or_default();
+    #[cfg(debug_assertions)]
+    let cache_load_ms = cache_load_start.elapsed().as_millis();
+    ensure_search_active(cancel)?;
 
     // Per-file resolution: reuse cached matches when the file's (size, mtime)
     // signature is unchanged; anything else (changed, new, or unstat-able)
     // is re-scanned. Files missing from the current walk drop out because the
-    // stored map is rebuilt from `file_paths` below.
-    let mut per_file: Vec<FileSlot> = file_paths
+    // stored map is rebuilt from `file_paths` below. Stat'ing every file is a
+    // fixed cost even when everything is cached, so a stale search stops here
+    // too (`None` short-circuits the collect).
+    #[cfg(debug_assertions)]
+    let signature_start = std::time::Instant::now();
+    let per_file: Option<Vec<FileSlot>> = file_paths
         .iter()
-        .map(|path| {
+        .enumerate()
+        .map(|(idx, path)| {
+            if idx % CANCEL_CHECK_INTERVAL == 0 {
+                #[cfg(test)]
+                run_cancel_check_hook(&projects_path, idx);
+                if is_cancelled(cancel) {
+                    return None;
+                }
+            }
             let signature = FileSignature::of(path);
             let cached = signature.and_then(|sig| {
                 cached_files
                     .get(path)
                     .and_then(|entry| (entry.signature == sig).then(|| Arc::clone(&entry.matches)))
             });
-            (signature, cached)
+            Some((signature, cached))
         })
         .collect();
+    let Some(mut per_file) = per_file else {
+        return Err(SEARCH_CANCELLED.to_string());
+    };
+    #[cfg(debug_assertions)]
+    let signature_ms = signature_start.elapsed().as_millis();
 
+    // Uncached files the filters rule out are not read: their slot stays
+    // empty, so they add nothing to the result and nothing to the cache.
+    let prefilter = ScanPrefilter::new(&filters);
     let scan_indices: Vec<usize> = per_file
         .iter()
         .enumerate()
         .filter(|(_, (_, cached))| cached.is_none())
+        .filter(|(idx, (signature, _))| !prefilter.excludes(&file_paths[*idx], *signature))
         .map(|(idx, _)| idx)
         .collect();
+    // Counted only where it is logged, so no build keeps an unused counter.
+    #[cfg(debug_assertions)]
+    let prefiltered = per_file
+        .iter()
+        .filter(|(_, cached)| cached.is_none())
+        .count()
+        - scan_indices.len();
 
     #[cfg(debug_assertions)]
     eprintln!(
-        "🔍 search_messages: {} files ({} cached, {} scanned)",
+        "🔍 search_messages: {} files ({} cached, {} skipped by pre-filter, {} scanned)",
         file_paths.len(),
-        file_paths.len() - scan_indices.len(),
+        file_paths.len() - scan_indices.len() - prefiltered,
+        prefiltered,
         scan_indices.len()
     );
 
     let matcher = build_matcher(&query);
 
-    let scanned: Vec<(usize, Arc<Vec<ClaudeMessage>>)> = scan_indices
+    // `None` from any file means the search went stale: the whole scan
+    // short-circuits and nothing below (in particular the cache) is reached.
+    #[cfg(debug_assertions)]
+    let scan_start = std::time::Instant::now();
+    let scanned: Option<Vec<(usize, Arc<Vec<ClaudeMessage>>)>> = scan_indices
         .into_par_iter()
         .map(|idx| {
+            if is_cancelled(cancel) {
+                return None;
+            }
             #[cfg(test)]
             note_scan(&file_paths[idx]);
-            (idx, Arc::new(search_in_file(&file_paths[idx], &matcher)))
+            let fallback_timestamp = per_file[idx].0.and_then(|signature| signature.mtime);
+            search_in_file(&file_paths[idx], &matcher, fallback_timestamp, cancel)
+                .map(|matches| (idx, Arc::new(matches)))
         })
         .collect();
+    let Some(scanned) = scanned else {
+        return Err(SEARCH_CANCELLED.to_string());
+    };
     for (idx, matches) in scanned {
         per_file[idx].1 = Some(matches);
     }
+    #[cfg(debug_assertions)]
+    let scan_ms = scan_start.elapsed().as_millis();
 
     // Merge in walk order — identical concatenation order to a cold scan, so
     // the selection below sees the same input either way.
+    #[cfg(debug_assertions)]
+    let filter_start = std::time::Instant::now();
     let raw: Vec<ClaudeMessage> = per_file
         .iter()
         .filter_map(|(_, matches)| matches.as_deref())
@@ -582,36 +858,70 @@ fn search_messages_blocking(
         filtered.truncate(max_results);
     }
     filtered.sort_unstable_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    #[cfg(debug_assertions)]
+    let filter_ms = filter_start.elapsed().as_millis();
+
+    // Last check, and the only one after the scan: from here on the search
+    // stores its (complete) matches and answers.
+    ensure_search_active(cancel)?;
 
     // Store the rebuilt per-file map; files whose signature could not be
-    // captured are computed without caching (re-scanned next call).
+    // captured are computed without caching (re-scanned next call). A file
+    // the pre-filter did not read keeps the matches the entry holds now when
+    // they are still valid for its signature: another search of the same
+    // query may have stored them while this one ran, and dropping them would
+    // make the next wider search read the file again.
+    #[cfg(debug_assertions)]
+    let store_start = std::time::Instant::now();
     if total_matches <= MAX_CACHED_MATCHES_PER_QUERY {
-        let files: HashMap<PathBuf, FileMatches> = file_paths
-            .into_iter()
-            .zip(per_file)
-            .filter_map(|(path, (signature, matches))| {
-                Some((
-                    path,
-                    FileMatches {
-                        signature: signature?,
-                        matches: matches?,
-                    },
-                ))
-            })
-            .collect();
         if let Ok(mut cache) = SEARCH_CACHE.lock() {
+            let current = cache.peek(&key).map(|entry| &entry.files);
+            let mut stored_matches = total_matches;
+            let mut files: HashMap<PathBuf, FileMatches> = HashMap::with_capacity(file_paths.len());
+            for (path, (signature, matches)) in file_paths.into_iter().zip(per_file) {
+                let Some(signature) = signature else {
+                    continue;
+                };
+                if let Some(matches) = matches {
+                    files.insert(path, FileMatches { signature, matches });
+                    continue;
+                }
+                let Some(kept) = current
+                    .and_then(|current| current.get(&path))
+                    .filter(|kept| kept.signature == signature)
+                else {
+                    continue;
+                };
+                if stored_matches + kept.matches.len() > MAX_CACHED_MATCHES_PER_QUERY {
+                    continue;
+                }
+                stored_matches += kept.matches.len();
+                let matches = Arc::clone(&kept.matches);
+                files.insert(path, FileMatches { signature, matches });
+            }
             cache.put(key, CachedQuerySearch { files });
         }
     }
+    #[cfg(debug_assertions)]
+    let store_ms = store_start.elapsed().as_millis();
 
     #[cfg(debug_assertions)]
     {
         let elapsed = start_time.elapsed();
         eprintln!(
-            "📊 search_messages performance: {} results (limit: {}), {}ms elapsed",
+            "📊 search_messages performance: {} results (limit: {}), {}ms elapsed \
+             (walk {}ms, cache load {}ms, signatures {}ms, scan {}ms, filter {}ms, \
+             cache store {}ms; {} files not read by the pre-filter)",
             filtered.len(),
             max_results,
-            elapsed.as_millis()
+            elapsed.as_millis(),
+            walk_ms,
+            cache_load_ms,
+            signature_ms,
+            scan_ms,
+            filter_ms,
+            store_ms,
+            prefiltered
         );
     }
 
@@ -650,11 +960,54 @@ fn clear_search_cache_for_test() {
     }
 }
 
+/// Test-only callback run at every cancel check inside `search_in_file`
+/// (lines 0, `CANCEL_CHECK_INTERVAL`, …), so a test can cancel at an exact
+/// point of a scan instead of racing it with sleeps.
+#[cfg(test)]
+type CancelCheckHook = Arc<dyn Fn(usize) + Send + Sync>;
+
+#[cfg(test)]
+fn cancel_check_hooks() -> &'static Mutex<HashMap<PathBuf, CancelCheckHook>> {
+    static HOOKS: std::sync::OnceLock<Mutex<HashMap<PathBuf, CancelCheckHook>>> =
+        std::sync::OnceLock::new();
+    HOOKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(test)]
+fn set_cancel_check_hook(path: &Path, hook: impl Fn(usize) + Send + Sync + 'static) {
+    cancel_check_hooks()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(path.to_path_buf(), Arc::new(hook));
+}
+
+#[cfg(test)]
+fn clear_cancel_check_hook(path: &Path) {
+    cancel_check_hooks()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .remove(path);
+}
+
+#[cfg(test)]
+fn run_cancel_check_hook(path: &Path, line: usize) {
+    // Clone out of the lock: the hook may cancel, which takes other locks.
+    let hook = cancel_check_hooks()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(path)
+        .cloned();
+    if let Some(hook) = hook {
+        hook(line);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs::File;
     use std::io::Write;
+    use std::sync::atomic::AtomicBool;
     use tempfile::TempDir;
 
     #[test]
@@ -708,6 +1061,8 @@ mod tests {
             "subagent_unique_needle".to_string(),
             serde_json::json!({ "projects": ["-work-proj"] }),
             Some(10),
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -769,6 +1124,8 @@ mod tests {
             "Rust".to_string(),
             serde_json::json!({}),
             None,
+            None,
+            None,
         )
         .await;
 
@@ -805,6 +1162,8 @@ mod tests {
             "ZmagicMarker99".to_string(),
             serde_json::json!({}),
             None,
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -837,6 +1196,8 @@ mod tests {
             "hello".to_string(), // lowercase
             serde_json::json!({}),
             None,
+            None,
+            None,
         )
         .await;
 
@@ -866,6 +1227,8 @@ mod tests {
             "nonexistent".to_string(),
             serde_json::json!({}),
             None,
+            None,
+            None,
         )
         .await;
 
@@ -882,6 +1245,8 @@ mod tests {
             temp_dir.path().to_string_lossy().to_string(),
             "test".to_string(),
             serde_json::json!({}),
+            None,
+            None,
             None,
         )
         .await;
@@ -900,6 +1265,8 @@ mod tests {
             serde_json::json!({
                 "dateRange": ["invalid-date", "2026-02-20T00:00:00Z"]
             }),
+            None,
+            None,
             None,
         )
         .await;
@@ -944,6 +1311,8 @@ mod tests {
             temp_dir.path().to_string_lossy().to_string(),
             query.to_string(),
             serde_json::json!({}),
+            None,
+            None,
             None,
         )
         .await
@@ -1106,6 +1475,8 @@ mod tests {
             "filterProbe9".to_string(),
             serde_json::json!({ "messageType": "user" }),
             Some(1),
+            None,
+            None,
         )
         .await
         .expect("filtered search must succeed");
@@ -1128,6 +1499,8 @@ mod tests {
             "filterProbe9".to_string(),
             serde_json::json!({ "messageType": "user" }),
             Some(1),
+            None,
+            None,
         )
         .await
         .expect("cold filtered search must succeed");
@@ -1194,6 +1567,8 @@ mod tests {
             "needle".to_string(),
             serde_json::json!({}),
             None,
+            None,
+            None,
         )
         .await
         .unwrap();
@@ -1227,10 +1602,682 @@ mod tests {
                 "needle".to_string(),
                 serde_json::json!({}),
                 None,
+                None,
+                None,
             )
             .await
             .unwrap();
             assert_eq!(messages.len(), 1, "{}", claude_path.display());
         }
+    }
+
+    // ─── 事前の絞り込み（読むファイルを先に絞る） ───────────────────────────
+
+    /// A user message with an explicit timestamp, or none at all when `ts` is
+    /// `None` (the scanner then falls back to the file's mtime).
+    fn message_at(uuid: &str, session_id: &str, ts: Option<&str>, content: &str) -> String {
+        let ts_field = ts
+            .map(|ts| format!(r#""timestamp":"{ts}","#))
+            .unwrap_or_default();
+        format!(
+            r#"{{"uuid":"{uuid}","sessionId":"{session_id}",{ts_field}"type":"user","message":{{"role":"user","content":"{content}"}}}}"#
+        )
+    }
+
+    fn write_session(project_dir: &Path, name: &str, lines: &[String]) -> PathBuf {
+        std::fs::create_dir_all(project_dir).unwrap();
+        let path = project_dir.join(name);
+        let mut body = lines.join("\n");
+        body.push('\n');
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    /// Pin a file's mtime. Windows needs a handle opened for writing.
+    fn set_mtime(path: &Path, mtime: DateTime<Utc>) {
+        let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.set_modified(SystemTime::from(mtime)).unwrap();
+    }
+
+    async fn search_with(
+        temp_dir: &TempDir,
+        query: &str,
+        filters: serde_json::Value,
+        cancel: Option<(&str, u64)>,
+    ) -> Result<Vec<ClaudeMessage>, String> {
+        search_messages(
+            temp_dir.path().to_string_lossy().to_string(),
+            query.to_string(),
+            filters,
+            Some(1000),
+            cancel.map(|(group, _)| group.to_string()),
+            cancel.map(|(_, seq)| seq),
+        )
+        .await
+    }
+
+    fn date_range(start: DateTime<Utc>, end: DateTime<Utc>) -> serde_json::Value {
+        serde_json::json!({ "dateRange": [start.to_rfc3339(), end.to_rfc3339()] })
+    }
+
+    #[tokio::test]
+    async fn test_prefilter_never_reads_files_outside_the_selected_projects() {
+        let temp_dir = TempDir::new().unwrap();
+        let projects = temp_dir.path().join("projects");
+        let wanted = write_session(
+            &projects.join("p-wanted"),
+            "s1.jsonl",
+            &[create_sample_user_message("w1", "s1", "projProbe1 here")],
+        );
+        let other = write_session(
+            &projects.join("p-other"),
+            "s2.jsonl",
+            &[create_sample_user_message("o1", "s2", "projProbe1 there")],
+        );
+
+        let results = search_with(
+            &temp_dir,
+            "projProbe1",
+            serde_json::json!({ "projects": ["p-wanted"] }),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(uuids(&results), ["w1"]);
+        assert_eq!(test_scan_count(&wanted), 1);
+        assert_eq!(
+            test_scan_count(&other),
+            0,
+            "a file outside the selected projects must not be read"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_prefilter_never_reads_files_last_written_before_the_date_range() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path().join("projects").join("p");
+        let now = Utc::now();
+        let old_ts = now - chrono::Duration::days(30);
+        let old = write_session(
+            &project_dir,
+            "old.jsonl",
+            &[message_at(
+                "old1",
+                "old",
+                Some(&old_ts.to_rfc3339()),
+                "dateProbe2 old",
+            )],
+        );
+        set_mtime(&old, old_ts);
+        let fresh = write_session(
+            &project_dir,
+            "fresh.jsonl",
+            &[message_at(
+                "new1",
+                "fresh",
+                Some(&now.to_rfc3339()),
+                "dateProbe2 new",
+            )],
+        );
+
+        let results = search_with(
+            &temp_dir,
+            "dateProbe2",
+            date_range(
+                now - chrono::Duration::days(2),
+                now + chrono::Duration::days(1),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(uuids(&results), ["new1"]);
+        assert_eq!(test_scan_count(&fresh), 1);
+        assert_eq!(
+            test_scan_count(&old),
+            0,
+            "a file last written before the range must not be read"
+        );
+    }
+
+    /// Cold search with a range and a project filter returns exactly what an
+    /// unfiltered search followed by the same filtered search returns —
+    /// including rows without a timestamp, which take the file's mtime.
+    #[tokio::test]
+    async fn test_prefilter_matches_the_unfiltered_then_filtered_result() {
+        let temp_dir = TempDir::new().unwrap();
+        let projects = temp_dir.path().join("projects");
+        let now = Utc::now();
+        let old_ts = now - chrono::Duration::days(30);
+        let recent_ts = now - chrono::Duration::hours(1);
+
+        let old = write_session(
+            &projects.join("p1"),
+            "old.jsonl",
+            &[
+                message_at("old-ts", "old", Some(&old_ts.to_rfc3339()), "eqProbe3 a"),
+                message_at("old-nots", "old", None, "eqProbe3 b"),
+            ],
+        );
+        set_mtime(&old, old_ts);
+        write_session(
+            &projects.join("p1"),
+            "fresh.jsonl",
+            &[
+                message_at(
+                    "p1-ts",
+                    "fresh",
+                    Some(&recent_ts.to_rfc3339()),
+                    "eqProbe3 c",
+                ),
+                message_at("p1-nots", "fresh", None, "eqProbe3 d"),
+                message_at(
+                    "p1-oldmsg",
+                    "fresh",
+                    Some(&old_ts.to_rfc3339()),
+                    "eqProbe3 e",
+                ),
+            ],
+        );
+        write_session(
+            &projects.join("p2"),
+            "other.jsonl",
+            &[message_at(
+                "p2-ts",
+                "other",
+                Some(&recent_ts.to_rfc3339()),
+                "eqProbe3 f",
+            )],
+        );
+
+        let mut filters = date_range(
+            now - chrono::Duration::days(2),
+            now + chrono::Duration::days(1),
+        );
+        filters["projects"] = serde_json::json!(["p1"]);
+
+        let cold = search_with(&temp_dir, "eqProbe3", filters.clone(), None)
+            .await
+            .unwrap();
+        assert_eq!(uuids(&cold), ["p1-nots", "p1-ts"]);
+
+        clear_search_cache_for_test();
+        let unfiltered = search_with(&temp_dir, "eqProbe3", serde_json::json!({}), None)
+            .await
+            .unwrap();
+        assert_eq!(unfiltered.len(), 6);
+        let warm = search_with(&temp_dir, "eqProbe3", filters, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&cold).unwrap(),
+            serde_json::to_value(&warm).unwrap(),
+            "the pre-filtered cold search must equal the filtered warm search"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_prefilter_uses_remembered_matches_and_reads_skipped_files_later() {
+        let temp_dir = TempDir::new().unwrap();
+        let projects = temp_dir.path().join("projects");
+        let a = write_session(
+            &projects.join("pa"),
+            "a.jsonl",
+            &[create_sample_user_message("a1", "a", "memProbe4 a")],
+        );
+        let b = write_session(
+            &projects.join("pb"),
+            "b.jsonl",
+            &[create_sample_user_message("b1", "b", "memProbe4 b")],
+        );
+        let only_a = serde_json::json!({ "projects": ["pa"] });
+
+        // Cold and narrowed: b is skipped and stays unread.
+        let narrowed = search_with(&temp_dir, "memProbe4", only_a.clone(), None)
+            .await
+            .unwrap();
+        assert_eq!(uuids(&narrowed), ["a1"]);
+        assert_eq!((test_scan_count(&a), test_scan_count(&b)), (1, 0));
+
+        // An unfiltered search reads the skipped file, and only it.
+        let all = search_with(&temp_dir, "memProbe4", serde_json::json!({}), None)
+            .await
+            .unwrap();
+        assert_eq!(uuids(&all), ["a1", "b1"]);
+        assert_eq!(
+            (test_scan_count(&a), test_scan_count(&b)),
+            (1, 1),
+            "the skipped file is read later; the remembered one is not re-read"
+        );
+
+        // Remembered matches serve a narrowed search too, even for b.
+        let only_b = search_with(
+            &temp_dir,
+            "memProbe4",
+            serde_json::json!({ "projects": ["pb"] }),
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(uuids(&only_b), ["b1"]);
+        let again_a = search_with(&temp_dir, "memProbe4", only_a, None)
+            .await
+            .unwrap();
+        assert_eq!(uuids(&again_a), ["a1"]);
+        assert_eq!((test_scan_count(&a), test_scan_count(&b)), (1, 1));
+    }
+
+    /// A file written exactly one hour before the range start is still read;
+    /// one written a second earlier is not.
+    #[tokio::test]
+    async fn test_prefilter_mtime_margin_is_one_hour() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path().join("projects").join("p");
+        let start = DateTime::parse_from_rfc3339("2026-01-10T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let edge = write_session(
+            &project_dir,
+            "edge.jsonl",
+            &[create_sample_user_message("e1", "edge", "marginProbe5")],
+        );
+        set_mtime(&edge, start - chrono::Duration::hours(1));
+        let past = write_session(
+            &project_dir,
+            "past.jsonl",
+            &[create_sample_user_message("p1", "past", "marginProbe5")],
+        );
+        set_mtime(
+            &past,
+            start - chrono::Duration::hours(1) - chrono::Duration::seconds(1),
+        );
+
+        search_with(
+            &temp_dir,
+            "marginProbe5",
+            date_range(start, start + chrono::Duration::days(1)),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(test_scan_count(&edge), 1, "exactly start - 1h is read");
+        assert_eq!(
+            test_scan_count(&past),
+            0,
+            "older than start - 1h is skipped"
+        );
+    }
+
+    // ─── 古い検索の中断 ─────────────────────────────────────────────────────
+
+    fn cached_entry_exists(temp_dir: &TempDir, query: &str) -> bool {
+        let key = cache_key(&temp_dir.path().to_string_lossy(), query);
+        SEARCH_CACHE
+            .lock()
+            .map(|cache| cache.peek(&key).is_some())
+            .unwrap_or(false)
+    }
+
+    /// A search cancelled in the middle of a file returns the cancel error,
+    /// stores nothing, and the next search reads the file again in full.
+    #[tokio::test]
+    async fn test_cancel_mid_file_returns_error_and_stores_nothing() {
+        let temp_dir = TempDir::new().unwrap();
+        let project_dir = temp_dir.path().join("projects").join("p");
+        let lines: Vec<String> = (0..600)
+            .map(|i| create_sample_user_message(&format!("m{i}"), "s", "cancelProbe6"))
+            .collect();
+        let file = write_session(&project_dir, "s.jsonl", &lines);
+
+        let group = "test-cancel-mid-file";
+        let checks = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&checks);
+        set_cancel_check_hook(&file, move |line| {
+            seen.lock().unwrap().push(line);
+            if line >= CANCEL_CHECK_INTERVAL {
+                cancel_search_group(group, 1);
+            }
+        });
+
+        let result = search_with(
+            &temp_dir,
+            "cancelProbe6",
+            serde_json::json!({}),
+            Some((group, 1)),
+        )
+        .await;
+        clear_cancel_check_hook(&file);
+
+        assert_eq!(result.unwrap_err(), SEARCH_CANCELLED);
+        assert_eq!(
+            *checks.lock().unwrap(),
+            [0, CANCEL_CHECK_INTERVAL],
+            "the scan stops at the first check after the cancel, mid-file"
+        );
+        assert!(
+            !cached_entry_exists(&temp_dir, "cancelProbe6"),
+            "a cancelled search must store nothing"
+        );
+
+        let full = search_with(&temp_dir, "cancelProbe6", serde_json::json!({}), None)
+            .await
+            .unwrap();
+        assert_eq!(full.len(), 600);
+        assert_eq!(test_scan_count(&file), 2, "the file is read again in full");
+        assert!(cached_entry_exists(&temp_dir, "cancelProbe6"));
+    }
+
+    /// A late cancel for an older search never stops a newer one.
+    #[tokio::test]
+    async fn test_late_cancel_for_an_older_seq_does_not_stop_a_newer_search() {
+        let temp_dir = TempDir::new().unwrap();
+        let file = write_session(
+            &temp_dir.path().join("projects").join("p"),
+            "s.jsonl",
+            &[create_sample_user_message("u1", "s", "lateProbe7")],
+        );
+        let group = "test-late-cancel";
+        set_cancel_check_hook(&file, move |_| cancel_search_group(group, 1));
+
+        let result = search_with(
+            &temp_dir,
+            "lateProbe7",
+            serde_json::json!({}),
+            Some((group, 2)),
+        )
+        .await;
+        clear_cancel_check_hook(&file);
+
+        assert_eq!(uuids(&result.unwrap()), ["u1"]);
+    }
+
+    /// A cancel that arrives before its search stops it before any read.
+    #[tokio::test]
+    async fn test_cancel_that_arrives_first_stops_the_search_before_reading() {
+        let temp_dir = TempDir::new().unwrap();
+        let file = write_session(
+            &temp_dir.path().join("projects").join("p"),
+            "s.jsonl",
+            &[create_sample_user_message("u1", "s", "earlyProbe8")],
+        );
+        let group = "test-early-cancel";
+        cancel_search(group.to_string(), 2).await.unwrap();
+
+        let result = search_with(
+            &temp_dir,
+            "earlyProbe8",
+            serde_json::json!({}),
+            Some((group, 2)),
+        )
+        .await;
+
+        assert_eq!(result.unwrap_err(), SEARCH_CANCELLED);
+        assert_eq!(test_scan_count(&file), 0, "nothing is read");
+        assert!(!cached_entry_exists(&temp_dir, "earlyProbe8"));
+
+        // A newer search in the same group runs.
+        let newer = search_with(
+            &temp_dir,
+            "earlyProbe8",
+            serde_json::json!({}),
+            Some((group, 3)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(uuids(&newer), ["u1"]);
+    }
+
+    /// Without both a group and a seq a search is never cancelled.
+    #[tokio::test]
+    async fn test_search_without_group_or_seq_is_never_cancelled() {
+        let temp_dir = TempDir::new().unwrap();
+        write_session(
+            &temp_dir.path().join("projects").join("p"),
+            "s.jsonl",
+            &[create_sample_user_message("u1", "s", "noSeqProbe9")],
+        );
+        let group = "test-no-seq";
+        cancel_search_group(group, 100);
+
+        for (cancel_group, cancel_seq) in [
+            (None, None),
+            (Some(group.to_string()), None),
+            (None, Some(1)),
+        ] {
+            let result = search_messages(
+                temp_dir.path().to_string_lossy().to_string(),
+                "noSeqProbe9".to_string(),
+                serde_json::json!({}),
+                None,
+                cancel_group.clone(),
+                cancel_seq,
+            )
+            .await;
+            assert_eq!(
+                uuids(&result.unwrap()),
+                ["u1"],
+                "group={cancel_group:?} seq={cancel_seq:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cancel_token_follows_the_latest_seq_in_any_arrival_order() {
+        let group = "test-token-order";
+        let three = SearchCancelToken::begin(Some(group), Some(3)).unwrap();
+        let two = SearchCancelToken::begin(Some(group), Some(2)).unwrap();
+        assert!(
+            two.is_cancelled(),
+            "an older search arriving late starts cancelled"
+        );
+        assert!(!three.is_cancelled());
+
+        cancel_search_group(group, 2);
+        assert!(!three.is_cancelled(), "cancel(2) leaves seq 3 running");
+        cancel_search_group(group, 3);
+        assert!(three.is_cancelled(), "cancel(3) stops seq 3");
+
+        let four = SearchCancelToken::begin(Some(group), Some(4)).unwrap();
+        assert!(!four.is_cancelled());
+        assert!(SearchCancelToken::begin(None, Some(4)).is_none());
+        assert!(SearchCancelToken::begin(Some(group), None).is_none());
+    }
+
+    /// Evicting a group from the bounded table never cancels a running search
+    /// nor panics.
+    #[test]
+    fn test_cancel_group_eviction_never_cancels_a_running_search() {
+        let token = SearchCancelToken::begin(Some("test-evicted-group"), Some(1)).unwrap();
+        for i in 0..(CANCEL_GROUP_CAPACITY + 10) {
+            let filler = format!("test-evict-filler-{i}");
+            let _ = SearchCancelToken::begin(Some(&filler), Some(5));
+            cancel_search_group(&filler, 7);
+        }
+        assert!(!token.is_cancelled());
+        assert!(ensure_search_active(Some(&token)).is_ok());
+        let groups = CANCEL_GROUPS.lock().unwrap_or_else(PoisonError::into_inner);
+        assert!(
+            groups.len() <= CANCEL_GROUP_CAPACITY,
+            "the group table is bounded"
+        );
+        assert!(
+            groups.peek("test-evicted-group").is_none(),
+            "the running search's group was really pushed out"
+        );
+    }
+
+    /// A group name longer than `MAX_CANCEL_GROUP_LEN` never enters the table:
+    /// the search runs uncancellable and `cancel_search` refuses it.
+    #[tokio::test]
+    async fn test_overlong_cancel_group_is_refused() {
+        let longest = "g".repeat(MAX_CANCEL_GROUP_LEN);
+        assert!(SearchCancelToken::begin(Some(&longest), Some(1)).is_some());
+        assert!(cancel_search(longest, 1).await.is_ok());
+
+        let overlong = "h".repeat(MAX_CANCEL_GROUP_LEN + 1);
+        assert!(SearchCancelToken::begin(Some(&overlong), Some(1)).is_none());
+        assert!(cancel_search(overlong.clone(), 1).await.is_err());
+        assert!(CANCEL_GROUPS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .peek(&overlong)
+            .is_none());
+    }
+
+    /// A search that goes stale while the files are being stat'ed stops there:
+    /// no file is read and nothing is stored.
+    #[tokio::test]
+    async fn test_cancel_during_signatures_stops_before_any_scan() {
+        let temp_dir = TempDir::new().unwrap();
+        let projects_path = temp_dir.path().join("projects");
+        let project_dir = projects_path.join("p");
+        let files: Vec<PathBuf> = (0..=CANCEL_CHECK_INTERVAL * 2)
+            .map(|i| {
+                write_session(
+                    &project_dir,
+                    &format!("s{i}.jsonl"),
+                    &[create_sample_user_message(
+                        &format!("u{i}"),
+                        "s",
+                        "sigProbe11",
+                    )],
+                )
+            })
+            .collect();
+
+        let group = "test-cancel-signatures";
+        let checks = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::clone(&checks);
+        set_cancel_check_hook(&projects_path, move |idx| {
+            seen.lock().unwrap().push(idx);
+            if idx >= CANCEL_CHECK_INTERVAL {
+                cancel_search_group(group, 1);
+            }
+        });
+        let result = search_with(
+            &temp_dir,
+            "sigProbe11",
+            serde_json::json!({}),
+            Some((group, 1)),
+        )
+        .await;
+        clear_cancel_check_hook(&projects_path);
+
+        assert_eq!(result.unwrap_err(), SEARCH_CANCELLED);
+        assert_eq!(*checks.lock().unwrap(), [0, CANCEL_CHECK_INTERVAL]);
+        assert!(files.iter().all(|file| test_scan_count(file) == 0));
+        assert!(!cached_entry_exists(&temp_dir, "sigProbe11"));
+    }
+
+    /// A narrowed search that finishes after a full one of the same query
+    /// keeps the full one's still-valid file matches instead of overwriting
+    /// them with its partial table.
+    #[tokio::test]
+    async fn test_narrowed_store_keeps_matches_of_a_concurrent_full_search() {
+        let temp_dir = TempDir::new().unwrap();
+        let projects = temp_dir.path().join("projects");
+        let wanted = write_session(
+            &projects.join("p-wanted"),
+            "s1.jsonl",
+            &[create_sample_user_message("w1", "s1", "mergeProbe12")],
+        );
+        let other = write_session(
+            &projects.join("p-other"),
+            "s2.jsonl",
+            &[create_sample_user_message("o1", "s2", "mergeProbe12")],
+        );
+        let claude_path = temp_dir.path().to_string_lossy().to_string();
+
+        // While the narrowed search reads its file, a full search of the same
+        // query runs to the end and stores both files.
+        let fired = Arc::new(AtomicBool::new(false));
+        let hook_fired = Arc::clone(&fired);
+        let hook_path = claude_path.clone();
+        set_cancel_check_hook(&wanted, move |_| {
+            if !hook_fired.swap(true, Ordering::SeqCst) {
+                let full = search_messages_blocking(
+                    hook_path.clone(),
+                    "mergeProbe12".to_string(),
+                    serde_json::json!({}),
+                    Some(1000),
+                    None,
+                )
+                .unwrap();
+                assert_eq!(full.len(), 2);
+            }
+        });
+        let narrowed = search_with(
+            &temp_dir,
+            "mergeProbe12",
+            serde_json::json!({ "projects": ["p-wanted"] }),
+            None,
+        )
+        .await;
+        clear_cancel_check_hook(&wanted);
+        assert_eq!(uuids(&narrowed.unwrap()), ["w1"]);
+        assert!(fired.load(Ordering::SeqCst));
+        assert_eq!(test_scan_count(&other), 1, "read once, by the full search");
+
+        let full = search_with(&temp_dir, "mergeProbe12", serde_json::json!({}), None)
+            .await
+            .unwrap();
+        assert_eq!(full.len(), 2);
+        assert_eq!(
+            test_scan_count(&other),
+            1,
+            "the full search's matches survive the narrowed store"
+        );
+    }
+
+    /// `search_all_providers` stops at once on a cancel instead of logging the
+    /// error and moving on to the next provider.
+    ///
+    /// Limit: this checks the returned error only. Without the
+    /// `Err(e) if e == SEARCH_CANCELLED => return Err(e)` arms the command
+    /// still fails the same way at the next stage check; what the arms add is
+    /// that no `log::warn!` is written for a cancel, which this test (with no
+    /// logger installed) does not observe.
+    #[tokio::test]
+    async fn test_search_all_providers_returns_the_cancel_error() {
+        let temp_dir = TempDir::new().unwrap();
+        let file = write_session(
+            &temp_dir.path().join("projects").join("p"),
+            "s.jsonl",
+            &[create_sample_user_message("u1", "s", "allProbe10")],
+        );
+        let claude_path = temp_dir.path().to_string_lossy().to_string();
+        let run = |group: Option<&str>, seq: Option<u64>| {
+            crate::commands::multi_provider::search_all_providers(
+                Some(claude_path.clone()),
+                "allProbe10".to_string(),
+                Some(vec!["claude".to_string()]),
+                None,
+                None,
+                None,
+                None,
+                Some(false),
+                None,
+                group.map(str::to_string),
+                seq,
+            )
+        };
+
+        assert_eq!(run(None, None).await.unwrap().len(), 1);
+
+        cancel_search_group("test-all-early", 5);
+        assert_eq!(
+            run(Some("test-all-early"), Some(5)).await.unwrap_err(),
+            SEARCH_CANCELLED
+        );
+
+        clear_search_cache_for_test();
+        set_cancel_check_hook(&file, |_| cancel_search_group("test-all-mid", 1));
+        let mid = run(Some("test-all-mid"), Some(1)).await;
+        clear_cancel_check_hook(&file);
+        assert_eq!(mid.unwrap_err(), SEARCH_CANCELLED);
     }
 }

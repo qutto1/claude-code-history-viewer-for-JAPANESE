@@ -40,6 +40,7 @@ import {
     type DateFilterSelection,
     type DateRangeError,
 } from "./dateRangeFilter";
+import { createSearchCancelGroup, isSearchCancelledError, requestSearchCancel } from "./searchCancel";
 import { buildSearchFilters, type MessageTypeFilter } from "./searchFilters";
 import {
     buildHighlightRegex,
@@ -124,6 +125,10 @@ export const GlobalSearchModal = ({
     // Bumped per search request and on close; a response whose token is stale
     // (a newer search started, e.g. while a date is being typed) is dropped.
     const searchRequestTokenRef = useRef(0);
+    // Names this mount to the backend, so its cancels reach only its searches.
+    const [cancelGroup] = useState(createSearchCancelGroup);
+    // Request token (sent as cancelSeq) of the search the backend is running.
+    const inFlightSearchSeqRef = useRef<number | null>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const resultsContainerRef = useRef<HTMLDivElement>(null);
     const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -285,9 +290,11 @@ export const GlobalSearchModal = ({
             }
 
             setIsSearching(true);
+            inFlightSearchSeqRef.current = requestToken;
             try {
                 const wslExcludedDistros = userMetadata?.settings?.wsl?.excludedDistros ?? [];
                 const useAllProvidersSearch = hasNonClaudeProviders || hasCustomPaths || wslEnabled;
+                const cancelKeys = { cancelGroup, cancelSeq: requestToken };
                 const searchResults = await api<GlobalSearchResult[]>(
                     useAllProvidersSearch ? "search_all_providers" : "search_messages",
                     useAllProvidersSearch
@@ -301,8 +308,15 @@ export const GlobalSearchModal = ({
                               wslEnabled,
                               wslProviders,
                               wslExcludedDistros,
+                              ...cancelKeys,
                           }
-                        : { claudePath: nativeClaudePath, query: trimmedQuery, filters, limit: MAX_RESULTS },
+                        : {
+                              claudePath: nativeClaudePath,
+                              query: trimmedQuery,
+                              filters,
+                              limit: MAX_RESULTS,
+                              ...cancelKeys,
+                          },
                 );
                 if (requestToken !== searchRequestTokenRef.current) return;
                 setResults(searchResults);
@@ -310,15 +324,18 @@ export const GlobalSearchModal = ({
                 setSelectedIndex(0);
             } catch (error) {
                 if (requestToken !== searchRequestTokenRef.current) return;
+                // A search the backend was told to stop is not a failure.
+                if (isSearchCancelledError(error)) return;
                 console.error("Global search failed:", error);
                 setResults([]);
                 setLastSearchedQuery("");
                 toast.error(t("globalSearch.searchFailed"));
             } finally {
+                if (inFlightSearchSeqRef.current === requestToken) inFlightSearchSeqRef.current = null;
                 if (requestToken === searchRequestTokenRef.current) setIsSearching(false);
             }
         },
-        [claudePath, activeProviders, selectedProjectPath, messageTypeFilter, searchDateFilter, userMetadata, t],
+        [claudePath, activeProviders, selectedProjectPath, messageTypeFilter, searchDateFilter, userMetadata, cancelGroup, t],
     );
 
     // Latest performSearch for the debounce timer, so a timer armed before a
@@ -328,29 +345,34 @@ export const GlobalSearchModal = ({
         performSearchRef.current = performSearch;
     }, [performSearch]);
 
-    // Drop the pending debounced search and invalidate any in-flight response.
+    // Drop the pending debounced search, invalidate any in-flight response and
+    // stop the backend search behind it. Tokens only grow, so the next search
+    // always carries a higher cancelSeq than the one cancelled here.
     const cancelPendingSearch = useCallback(() => {
         if (debounceTimeoutRef.current) {
             clearTimeout(debounceTimeoutRef.current);
             debounceTimeoutRef.current = null;
         }
         searchRequestTokenRef.current++;
-    }, []);
+        const runningSeq = inFlightSearchSeqRef.current;
+        if (runningSeq == null) return;
+        inFlightSearchSeqRef.current = null;
+        void requestSearchCancel(cancelGroup, runningSeq);
+    }, [cancelGroup]);
 
     // Handle input change with debounce
     const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const value = e.target.value;
         setQuery(value);
 
-        if (debounceTimeoutRef.current) {
-            clearTimeout(debounceTimeoutRef.current);
-        }
+        // The pending or running search is for the query being replaced.
+        cancelPendingSearch();
 
         debounceTimeoutRef.current = setTimeout(() => {
             debounceTimeoutRef.current = null;
             void performSearchRef.current(value);
         }, 300);
-    }, []);
+    }, [cancelPendingSearch]);
 
     // Navigate to selected result
     const handleSelectResult = useCallback(
@@ -541,14 +563,9 @@ export const GlobalSearchModal = ({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [performSearch]);
 
-    // Cleanup debounce on unmount
-    useEffect(() => {
-        return () => {
-            if (debounceTimeoutRef.current) {
-                clearTimeout(debounceTimeoutRef.current);
-            }
-        };
-    }, []);
+    // Closing unmounts the modal (see GlobalSearchModalContainer), so this is
+    // where a closed modal drops its debounce and stops its running search.
+    useEffect(() => () => cancelPendingSearch(), [cancelPendingSearch]);
 
     // Searchable strings per result, collected once per result set rather than
     // on every keystroke/arrow re-render (250 rows × deep tool payload walks).

@@ -1,3 +1,6 @@
+use crate::commands::session::{
+    ensure_search_active, search_messages_with_cancel, SearchCancelToken, SEARCH_CANCELLED,
+};
 use crate::models::{ClaudeMessage, ClaudeProject, ClaudeSession, MessagePage};
 use crate::providers;
 use crate::utils::{parse_rfc3339_utc, search_result_priority};
@@ -697,6 +700,10 @@ fn provider_search_limit(max_results: usize, filters: &Value) -> usize {
 }
 
 /// Search across all (or selected) providers
+///
+/// `cancel_group` / `cancel_seq` work as in `search_messages`: the token is
+/// registered once here, every Claude root shares it, and the search stops
+/// with `Err(SEARCH_CANCELLED)` after the stage in which it went stale.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn search_all_providers(
@@ -709,7 +716,11 @@ pub async fn search_all_providers(
     custom_claude_paths: Option<Vec<CustomClaudePathParam>>,
     wsl_enabled: Option<bool>,
     wsl_excluded_distros: Option<Vec<String>>,
+    cancel_group: Option<String>,
+    cancel_seq: Option<u64>,
 ) -> Result<Vec<ClaudeMessage>, String> {
+    let cancel = SearchCancelToken::begin(cancel_group.as_deref(), cancel_seq);
+    ensure_search_active(cancel.as_ref())?;
     let max_results = limit.unwrap_or(100);
     let search_filters =
         filters.unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::default()));
@@ -764,11 +775,12 @@ pub async fn search_all_providers(
     if providers_to_search.iter().any(|p| p == "claude") {
         let claude_base = claude_path.or_else(providers::claude::get_base_path);
         if let Some(base) = claude_base {
-            match crate::commands::session::search_messages(
+            match search_messages_with_cancel(
                 base,
                 query.clone(),
                 search_filters.clone(),
                 Some(max_results),
+                cancel.clone(),
             )
             .await
             {
@@ -780,6 +792,7 @@ pub async fn search_all_providers(
                     }
                     all_results.extend(results);
                 }
+                Err(e) if e == SEARCH_CANCELLED => return Err(e),
                 Err(e) => {
                     log::warn!("Claude search failed: {e}");
                 }
@@ -793,11 +806,12 @@ pub async fn search_all_providers(
                 if crate::utils::validate_custom_claude_path(&custom_base).is_err() {
                     continue;
                 }
-                match crate::commands::session::search_messages(
+                match search_messages_with_cancel(
                     custom.path.clone(),
                     query.clone(),
                     search_filters.clone(),
                     Some(max_results),
+                    cancel.clone(),
                 )
                 .await
                 {
@@ -809,6 +823,7 @@ pub async fn search_all_providers(
                         }
                         all_results.extend(results);
                     }
+                    Err(e) if e == SEARCH_CANCELLED => return Err(e),
                     Err(e) => {
                         log::warn!("Custom Claude path search failed ({}): {e}", custom.path);
                     }
@@ -816,6 +831,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Codex
     if providers_to_search.iter().any(|p| p == "codex") {
@@ -826,6 +842,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Continue.dev
     if providers_to_search.iter().any(|p| p == "continue") {
@@ -836,6 +853,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // PearAI
     if providers_to_search.iter().any(|p| p == "pearai") {
@@ -846,6 +864,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Gemini
     if providers_to_search.iter().any(|p| p == "gemini") {
@@ -856,6 +875,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Goose
     if providers_to_search.iter().any(|p| p == "goose") {
@@ -866,6 +886,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Grok
     if providers_to_search.iter().any(|p| p == "grok") {
@@ -876,6 +897,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Kimi
     if providers_to_search.iter().any(|p| p == "kimi") {
@@ -886,6 +908,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Mistral Vibe
     if providers_to_search.iter().any(|p| p == "vibe") {
@@ -896,6 +919,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // ForgeCode
     if providers_to_search.iter().any(|p| p == "forgecode") {
@@ -906,6 +930,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Kilo Code
     if providers_to_search.iter().any(|p| p == "kilo") {
@@ -916,6 +941,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // OpenCode
     if providers_to_search.iter().any(|p| p == "opencode") {
@@ -926,6 +952,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Open Interpreter
     if providers_to_search.iter().any(|p| p == "openinterpreter") {
@@ -936,6 +963,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Pi
     if providers_to_search.iter().any(|p| p == "pi") {
@@ -946,6 +974,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // oh-my-pi
     if providers_to_search.iter().any(|p| p == "ompi") {
@@ -956,6 +985,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Z Code
     if providers_to_search.iter().any(|p| p == "zcode") {
@@ -966,6 +996,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Qwen Code
     if providers_to_search.iter().any(|p| p == "qwen") {
@@ -976,6 +1007,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Cline
     if providers_to_search.iter().any(|p| p == "cline") {
@@ -986,6 +1018,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Crush
     if providers_to_search.iter().any(|p| p == "crush") {
@@ -996,6 +1029,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Cursor
     if providers_to_search.iter().any(|p| p == "cursor") {
@@ -1006,6 +1040,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Cursor Agent
     if providers_to_search.iter().any(|p| p == "cursor-agent") {
@@ -1016,6 +1051,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Aider
     if providers_to_search.iter().any(|p| p == "aider") {
@@ -1026,6 +1062,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Amazon Q Developer CLI
     if providers_to_search.iter().any(|p| p == "amazonq") {
@@ -1036,6 +1073,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Antigravity
     if providers_to_search.iter().any(|p| p == "antigravity") {
@@ -1046,6 +1084,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // CodeBuddy
     if providers_to_search.iter().any(|p| p == "codebuddy") {
@@ -1056,6 +1095,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
     // Kiro
     if providers_to_search.iter().any(|p| p == "kiro") {
         match providers::kiro::search(&query, provider_limit) {
@@ -1065,6 +1105,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // llm (Simon Willison)
     if providers_to_search.iter().any(|p| p == "llm") {
@@ -1075,6 +1116,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Zed
     if providers_to_search.iter().any(|p| p == "zed") {
@@ -1085,6 +1127,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // OpenHands
     if providers_to_search.iter().any(|p| p == "openhands") {
@@ -1095,6 +1138,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Trae IDE
     if providers_to_search.iter().any(|p| p == "trae") {
@@ -1105,6 +1149,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // Unified GitHub Copilot search (CLI + Desktop + VS Code Copilot Chat).
     if providers_to_search.iter().any(|p| p == "copilot") {
@@ -1115,6 +1160,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     // WSL search
     if wsl_enabled.unwrap_or(false) && !wsl_search_providers.is_empty() {
@@ -1127,11 +1173,12 @@ pub async fn search_all_providers(
                     crate::wsl::resolve_wsl_provider_path(&distro.name, &claude_linux_path)
                 {
                     let unc_str = unc_path.to_string_lossy().to_string();
-                    match crate::commands::session::search_messages(
+                    match search_messages_with_cancel(
                         unc_str,
                         query.clone(),
                         search_filters.clone(),
                         Some(max_results),
+                        cancel.clone(),
                     )
                     .await
                     {
@@ -1143,6 +1190,7 @@ pub async fn search_all_providers(
                             }
                             all_results.extend(results);
                         }
+                        Err(e) if e == SEARCH_CANCELLED => return Err(e),
                         Err(e) => {
                             log::warn!("WSL Claude search failed for '{}': {e}", distro.name);
                         }
@@ -1203,6 +1251,7 @@ pub async fn search_all_providers(
             }
         }
     }
+    ensure_search_active(cancel.as_ref())?;
 
     all_results = crate::commands::session::apply_search_filters(all_results, &search_filters);
 

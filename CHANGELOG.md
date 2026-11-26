@@ -11,6 +11,24 @@ listed first. Every entry without a `-fork` suffix is upstream
 `jhlee0409/claude-code-history-viewer` and is left exactly as upstream wrote it; a version
 number appearing in the fork entries does not imply an upstream release of the same number.
 
+## [1.32.2-fork.5] - 2026-11-27
+
+Fork release: keyword search reads fewer files when it is narrowed, and a search that has been typed over is stopped.
+
+### Changed
+- **A period or project filter now narrows what is read** — search used to read every session file it had not cached and filter the matches afterwards. It now skips, without reading, a file outside the selected project, or one last written more than an hour before the date range starts. Matches already cached are used as before, and a later, wider search reads the skipped files.
+- **A search the dialog no longer needs is stopped** — typing, changing a filter, clearing the box or closing the dialog now tells the backend to stop the running search instead of only ignoring its answer. `search_messages` and `search_all_providers` accept optional `cancelGroup` / `cancelSeq`, and the new `cancel_search` command takes both. Calls without them behave as before.
+
+### Fixed
+- A message row without a timestamp was given the current time on every search, so it counted as "just now" in a date range. It now takes the time its file was last written.
+
+### Known limits
+- A search with neither a period nor a project still reads every file it has not cached.
+- A stopped search stores nothing, so the next one reads those files again.
+- Listing the session folders cannot be interrupted, and the non-Claude providers stop only between one provider and the next.
+- The date skip relies on file modification times. On a FAT32 drive or a network share written in another time zone they can be off by hours, and a file with matches in the range could then be missed.
+- In the WebUI a stopped search comes back as HTTP 500 and is logged in the browser console. No message is shown.
+
 ## [1.32.2-fork.4] - 2026-11-26
 
 Fork release: the message viewer's filter can now hide system and other internal rows.

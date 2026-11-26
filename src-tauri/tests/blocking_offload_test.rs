@@ -107,6 +107,8 @@ async fn search_messages_leaves_the_runtime_free() {
             "needle".to_string(),
             serde_json::json!({}),
             None,
+            None,
+            None,
         ))
         .await,
         "search_messages held the runtime thread for the whole search"
