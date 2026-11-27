@@ -11,6 +11,21 @@ listed first. Every entry without a `-fork` suffix is upstream
 `jhlee0409/claude-code-history-viewer` and is left exactly as upstream wrote it; a version
 number appearing in the fork entries does not imply an upstream release of the same number.
 
+## [1.32.2-fork.6] - 2026-11-27
+
+Fork release: subagent and workflow transcripts are counted under their project, in search and in the statistics.
+
+### Fixed
+- **Search hits from workflow transcripts carried the run folder's name** — a hit under `subagents/workflows/wf_*/` was labelled `wf_…`, so it was grouped under a project that does not exist and a project filter never returned it. Search now names every hit after the folder directly under `projects/` that holds its file, at any depth.
+- **The statistics counted `subagents` and `wf_*` as projects** — in the global statistics those files now count toward the project folder they were listed under, so the project count drops and that project gains their sessions, messages and tokens. The totals do not change. An orphaned subagent transcript in a project's token statistics, and the statistics of a single nested transcript, are named after the project folder too.
+
+### Changed
+- A search hit from a file lying directly in `projects/` now has no project name (it was `projects`). A folder below the project folder, whatever it is called, no longer names the project.
+
+### Known limits
+- The global statistics still count every transcript file as one session, so a project's session count now includes its subagent and workflow files. Without a date filter a workflow journal counts as a session with no messages.
+- The statistics of a single session read the project name from its path: in a project folder itself named `projects`, or under a folder spelled `Projects`, a nested transcript gets another folder's name.
+
 ## [1.32.2-fork.5] - 2026-11-27
 
 Fork release: keyword search reads fewer files when it is narrowed, and a search that has been typed over is stopped.

@@ -1156,14 +1156,36 @@ struct SessionFileStats {
     provider: StatsProvider,
 }
 
-/// Project display name for a Claude session file (parent directory name).
-fn claude_session_project_name(session_path: &Path) -> String {
-    session_path
-        .parent()
-        .and_then(|p| p.file_name())
+/// Display name of a Claude project: the name of its folder.
+fn claude_project_dir_name(project_dir: &Path) -> String {
+    project_dir
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("Unknown")
         .to_string()
+}
+
+/// Project display name for a Claude session file when only its path is
+/// known: the folder directly under `projects/` that holds it, at any depth
+/// (subagent and workflow transcripts sit below the project folder). The
+/// deepest such folder wins; a path under no `projects/` folder is named after
+/// its parent directory. The match is case-sensitive.
+///
+/// Limitation: in a project folder itself named `projects`, a nested
+/// transcript gets the session folder's name. Global and project stats do not
+/// call this; they take the name from the project folder.
+fn claude_session_project_name(session_path: &Path) -> String {
+    let parent = session_path.parent();
+    parent
+        .into_iter()
+        .flat_map(Path::ancestors)
+        .find(|dir| {
+            dir.parent()
+                .and_then(Path::file_name)
+                .is_some_and(|name| name == "projects")
+        })
+        .or(parent)
+        .map_or_else(|| "Unknown".to_string(), claude_project_dir_name)
 }
 
 /// Process a session file into the lightweight global stats representation.
@@ -1172,6 +1194,7 @@ fn claude_session_project_name(session_path: &Path) -> String {
 /// the full scan (see the `cache` module design note).
 fn process_session_file_for_global_stats(
     session_path: &PathBuf,
+    project_name: &str,
     mode: StatsMode,
     s_limit: Option<&DateTime<Utc>>,
     e_limit: Option<&DateTime<Utc>>,
@@ -1179,16 +1202,13 @@ fn process_session_file_for_global_stats(
     if let Some(aggregate) = cache::global_stats_cache().get_or_build(session_path, mode, || {
         cache::build_global_file_aggregate(session_path, mode)
     }) {
-        if let cache::Composed::Ready(stats) = cache::compose_global(
-            &aggregate,
-            claude_session_project_name(session_path),
-            s_limit,
-            e_limit,
-        ) {
+        if let cache::Composed::Ready(stats) =
+            cache::compose_global(&aggregate, project_name.to_string(), s_limit, e_limit)
+        {
             return Some(stats);
         }
     }
-    scan_session_file_for_global_stats(session_path, mode, s_limit, e_limit)
+    scan_session_file_for_global_stats(session_path, project_name, mode, s_limit, e_limit)
 }
 
 /// Process a single session file using lightweight deserialization for global stats.
@@ -1197,6 +1217,7 @@ fn process_session_file_for_global_stats(
 /// Full-scan path for global stats (cache miss / non-composable date filter).
 fn scan_session_file_for_global_stats(
     session_path: &PathBuf,
+    project_name: &str,
     mode: StatsMode,
     s_limit: Option<&DateTime<Utc>>,
     e_limit: Option<&DateTime<Utc>>,
@@ -1208,7 +1229,7 @@ fn scan_session_file_for_global_stats(
     let mmap = unsafe { Mmap::map(&file) }.ok()?;
 
     let mut stats = SessionFileStats {
-        project_name: claude_session_project_name(session_path),
+        project_name: project_name.to_string(),
         provider: StatsProvider::Claude,
         ..Default::default()
     };
@@ -4259,6 +4280,7 @@ pub async fn get_session_token_stats(
     let session_path_buf = PathBuf::from(&session_path);
     let stats = extract_session_token_stats_sync(
         &session_path_buf,
+        claude_session_project_name(&session_path_buf),
         mode,
         s_limit.as_ref(),
         e_limit.as_ref(),
@@ -4418,6 +4440,7 @@ impl SessionTokenAccum {
 /// transcript counts (#577).
 fn extract_session_token_stats_sync(
     session_path: &PathBuf,
+    project_name: String,
     mode: StatsMode,
     s_limit: Option<&DateTime<Utc>>,
     e_limit: Option<&DateTime<Utc>>,
@@ -4436,7 +4459,7 @@ fn extract_session_token_stats_sync(
             }
         }
     }
-    accum.map(|accum| accum.into_stats(claude_session_project_name(session_path)))
+    accum.map(|accum| accum.into_stats(project_name))
 }
 
 /// One transcript file's stats before finalisation. Served from the per-file
@@ -4643,11 +4666,21 @@ pub async fn get_project_token_stats(
     let s_limit = parse_date_limit(start_date, "start_date");
     let e_limit = parse_date_limit(end_date, "end_date");
 
+    // Every item belongs to this project, however deep its transcript sits
+    // (an orphaned subagent run is listed on its own).
+    let project_name = claude_project_dir_name(&project_path_buf);
+
     // Process all sessions in parallel with per-message date filtering
     let all_stats: Vec<SessionTokenStats> = session_files
         .par_iter()
         .filter_map(|path| {
-            extract_session_token_stats_sync(path, mode, s_limit.as_ref(), e_limit.as_ref())
+            extract_session_token_stats_sync(
+                path,
+                project_name.clone(),
+                mode,
+                s_limit.as_ref(),
+                e_limit.as_ref(),
+            )
         })
         .collect();
 
@@ -4715,11 +4748,7 @@ pub async fn get_project_stats_summary(
     }
 
     let start = std::time::Instant::now();
-    let project_name = PathBuf::from(&project_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("Unknown")
-        .to_string();
+    let project_name = claude_project_dir_name(&project_path_buf);
 
     let s_limit = parse_date_limit(start_date, "start_date");
     let e_limit = parse_date_limit(end_date, "end_date");
@@ -5320,11 +5349,13 @@ pub async fn get_global_stats_summary(
     // Claude root AND any user-configured custom Claude directories (#362). Without
     // the custom roots the global summary undercounts everything for users who added
     // extra Claude directories, even though the project list and search honor them.
-    let mut session_files: Vec<PathBuf> = Vec::new();
+    // Each file keeps the name of the project folder it was listed under, so
+    // nested transcripts are not named after their parent directory.
+    let mut session_files: Vec<(String, PathBuf)> = Vec::new();
     let mut project_names: HashSet<String> = HashSet::new();
 
     let collect_claude_base = |projects_path: &Path,
-                               session_files: &mut Vec<PathBuf>,
+                               session_files: &mut Vec<(String, PathBuf)>,
                                project_names: &mut HashSet<String>| {
         if !projects_path.exists() {
             return;
@@ -5339,13 +5370,13 @@ pub async fn get_global_stats_summary(
         };
         log_skipped_history(projects_path, &listing.links, &listing.errors);
         for project_path in listing.dirs {
-            let project_name = project_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("Unknown")
-                .to_string();
+            let project_name = claude_project_dir_name(&project_path);
             project_names.insert(format!("claude:{project_name}"));
-            session_files.extend(claude_project_session_files(&project_path));
+            session_files.extend(
+                claude_project_session_files(&project_path)
+                    .into_iter()
+                    .map(|file| (project_name.clone(), file)),
+            );
         }
     };
 
@@ -5381,7 +5412,9 @@ pub async fn get_global_stats_summary(
     let e_ref = e_limit.as_ref();
     let mut file_stats: Vec<SessionFileStats> = session_files
         .par_iter()
-        .filter_map(|path| process_session_file_for_global_stats(path, mode, s_ref, e_ref))
+        .filter_map(|(project_name, path)| {
+            process_session_file_for_global_stats(path, project_name, mode, s_ref, e_ref)
+        })
         .collect();
 
     if providers_to_include.contains(&StatsProvider::Codebuddy) {
@@ -9327,5 +9360,519 @@ mod tests {
         assert_eq!(usage.cache_creation_input_tokens_5m, Some(10));
         assert_eq!(usage.cache_creation_input_tokens_1h, Some(5));
         assert_eq!(usage.service_tier.as_deref(), Some("standard"));
+    }
+
+    const PROJECT_P: &str = "C--work-project-p";
+    const PROJECT_Q: &str = "C--work-project-q";
+    const SESSION_P: &str = "11111111-1111-1111-1111-111111111111";
+    const ORPHAN_P: &str = "22222222-2222-2222-2222-222222222222";
+
+    /// One assistant row with usage; `id` names both the row and its turn.
+    fn transcript_row(id: &str, ts: &str, input: u64, output: u64, sidechain: bool) -> String {
+        json!({
+            "uuid": id,
+            "sessionId": "s-nested",
+            "timestamp": ts,
+            "type": "assistant",
+            "isSidechain": sidechain,
+            "message": {
+                "role": "assistant",
+                "id": format!("m-{id}"),
+                "model": "claude-sonnet-4",
+                "content": [{"type": "text", "text": "x"}],
+                "usage": {"input_tokens": input, "output_tokens": output}
+            }
+        })
+        .to_string()
+    }
+
+    fn write_transcript(path: &Path, rows: &[String]) {
+        fs::create_dir_all(path.parent().expect("transcript parent")).expect("transcript dir");
+        fs::write(path, format!("{}\n", rows.join("\n"))).expect("transcript file");
+    }
+
+    /// A workflow `journal.jsonl`: run records without a `message`.
+    fn write_journal(path: &Path) {
+        let rows: Vec<String> = ["launched", "started", "result", "failed"]
+            .iter()
+            .map(|kind| json!({"type": kind, "key": "k1", "agentId": "b"}).to_string())
+            .collect();
+        write_transcript(path, &rows);
+    }
+
+    /// Two rows on 2025-02-02, at 10:00 and 14:00, so a filter starting at
+    /// noon cuts through the day and forces the full scan.
+    fn two_rows(id: &str, first: (u64, u64), second: (u64, u64), sidechain: bool) -> Vec<String> {
+        vec![
+            transcript_row(
+                &format!("{id}-am"),
+                "2025-02-02T10:00:00Z",
+                first.0,
+                first.1,
+                sidechain,
+            ),
+            transcript_row(
+                &format!("{id}-pm"),
+                "2025-02-02T14:00:00Z",
+                second.0,
+                second.1,
+                sidechain,
+            ),
+        ]
+    }
+
+    /// Project P with a session, a subagent, a workflow agent and a workflow
+    /// journal, plus project Q with one session, under `<base>/projects`.
+    /// Returns every transcript written.
+    fn write_nested_projects(base: &Path) -> Vec<PathBuf> {
+        let p = base.join("projects").join(PROJECT_P);
+        let q = base.join("projects").join(PROJECT_Q);
+        let subagents = p.join(SESSION_P).join("subagents");
+        let run = subagents.join("workflows").join("wf_1");
+
+        let session = p.join(format!("{SESSION_P}.jsonl"));
+        let mut rows = vec![transcript_row(
+            "s-day1",
+            "2025-02-01T10:00:00Z",
+            100,
+            10,
+            false,
+        )];
+        rows.extend(two_rows("s", (200, 20), (300, 30), false));
+        write_transcript(&session, &rows);
+
+        let agent = subagents.join("agent-a.jsonl");
+        write_transcript(&agent, &two_rows("a", (1000, 100), (2000, 200), true));
+        let workflow_agent = run.join("agent-b.jsonl");
+        write_transcript(
+            &workflow_agent,
+            &two_rows("b", (3000, 300), (4000, 400), true),
+        );
+        let journal = run.join("journal.jsonl");
+        write_journal(&journal);
+        let other = q.join("session-q.jsonl");
+        write_transcript(&other, &two_rows("q", (5, 1), (7, 2), false));
+
+        vec![session, agent, workflow_agent, journal, other]
+    }
+
+    async fn nested_global_summary(
+        base: &Path,
+        mode: &str,
+        range: (Option<&str>, Option<&str>),
+        custom: Option<&Path>,
+    ) -> GlobalStatsSummary {
+        get_global_stats_summary(
+            base.to_string_lossy().to_string(),
+            Some(vec!["claude".to_string()]),
+            Some(mode.to_string()),
+            range.0.map(str::to_string),
+            range.1.map(str::to_string),
+            custom.map(|path| {
+                vec![crate::commands::multi_provider::CustomClaudePathParam {
+                    path: path.to_string_lossy().to_string(),
+                    label: None,
+                }]
+            }),
+        )
+        .await
+        .expect("global summary")
+    }
+
+    /// `top_projects` as (name, sessions, messages, tokens), sorted by name.
+    fn ranking(summary: &GlobalStatsSummary) -> Vec<(String, u32, u32, u64)> {
+        let mut rows: Vec<(String, u32, u32, u64)> = summary
+            .top_projects
+            .iter()
+            .map(|p| (p.project_name.clone(), p.sessions, p.messages, p.tokens))
+            .collect();
+        rows.sort();
+        rows
+    }
+
+    #[tokio::test]
+    #[serial]
+    /// Subagent, workflow-agent and journal files count toward the project
+    /// folder under `projects/`, not toward `subagents` or `wf_*`.
+    async fn test_global_summary_names_nested_transcripts_after_their_project() {
+        let _home = crate::test_utils::SandboxHome::new();
+        let temp_dir = TempDir::new().expect("temp dir");
+        let files = write_nested_projects(temp_dir.path());
+
+        let whole = (None, None);
+        let day = (
+            Some("2025-02-02T00:00:00Z"),
+            Some("2025-02-02T23:59:59.999Z"),
+        );
+        let afternoon = (
+            Some("2025-02-02T12:00:00Z"),
+            Some("2025-02-02T23:59:59.999Z"),
+        );
+        // (mode, range, totals (tokens, messages, sessions), P, Q), each
+        // project as (sessions, messages, tokens). Without a date filter the
+        // journal is a session with no messages; a filter drops it.
+        let cases = [
+            (
+                "billing_total",
+                whole,
+                (11_675, 9, 5),
+                (4, 7, 11_660),
+                (1, 2, 15),
+            ),
+            (
+                "conversation_only",
+                whole,
+                (675, 5, 5),
+                (4, 3, 660),
+                (1, 2, 15),
+            ),
+            (
+                "billing_total",
+                day,
+                (11_565, 8, 4),
+                (3, 6, 11_550),
+                (1, 2, 15),
+            ),
+            (
+                "conversation_only",
+                day,
+                (565, 4, 2),
+                (1, 2, 550),
+                (1, 2, 15),
+            ),
+            (
+                "billing_total",
+                afternoon,
+                (6_939, 4, 4),
+                (3, 3, 6_930),
+                (1, 1, 9),
+            ),
+            (
+                "conversation_only",
+                afternoon,
+                (339, 2, 2),
+                (1, 1, 330),
+                (1, 1, 9),
+            ),
+        ];
+
+        // The afternoon filter cannot be composed from daily buckets, so it
+        // exercises the full scan.
+        let noon = parse_timestamp_utc("2025-02-02T12:00:00Z").expect("noon");
+        let aggregate = cache::build_global_file_aggregate(&files[1], StatsMode::BillingTotal)
+            .expect("aggregate");
+        assert!(matches!(
+            cache::compose_global(&aggregate, "p".to_string(), Some(&noon), None),
+            cache::Composed::NeedsFullScan
+        ));
+
+        let mut results = Vec::new();
+        for (mode, range, ..) in cases {
+            // Twice: the second call is served from the per-file cache.
+            for call in ["first", "second"] {
+                let summary = nested_global_summary(temp_dir.path(), mode, range, None).await;
+                results.push((mode, range, call, summary));
+            }
+        }
+        // One parse per file and stats mode, however often it was asked for.
+        for file in &files {
+            assert_eq!(cache::test_build_count(file), 2, "{}", file.display());
+        }
+
+        let expected: Vec<_> = cases.iter().flat_map(|case| [case, case]).collect();
+        // The totals do not depend on how the files are named.
+        for ((mode, range, call, summary), case) in results.iter().zip(&expected) {
+            assert_eq!(
+                (
+                    summary.total_tokens,
+                    summary.total_messages,
+                    summary.total_sessions
+                ),
+                case.2,
+                "totals: {mode} {range:?} {call}"
+            );
+        }
+        for ((mode, range, call, summary), case) in results.iter().zip(&expected) {
+            let (p, q) = (case.3, case.4);
+            assert_eq!(
+                ranking(summary),
+                vec![
+                    (PROJECT_P.to_string(), p.0, p.1, p.2),
+                    (PROJECT_Q.to_string(), q.0, q.1, q.2),
+                ],
+                "top_projects: {mode} {range:?} {call}"
+            );
+            assert_eq!(summary.total_projects, 2, "{mode} {range:?} {call}");
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    /// The same project folder name under the default and a custom root stays
+    /// one project, nested transcripts included.
+    async fn test_global_summary_names_nested_transcripts_in_custom_roots() {
+        let _home = crate::test_utils::SandboxHome::new();
+        let default_dir = TempDir::new().expect("default dir");
+        let custom_dir = TempDir::new().expect("custom dir");
+        write_nested_projects(default_dir.path());
+        let custom_p = custom_dir.path().join("projects").join(PROJECT_P);
+        write_transcript(
+            &custom_p.join("custom-session.jsonl"),
+            &two_rows("c", (10, 1), (20, 2), false),
+        );
+        write_transcript(
+            &custom_p
+                .join("custom-session")
+                .join("subagents")
+                .join("workflows")
+                .join("wf_9")
+                .join("agent-c.jsonl"),
+            &two_rows("ca", (40, 4), (50, 5), true),
+        );
+
+        let summary = nested_global_summary(
+            default_dir.path(),
+            "billing_total",
+            (None, None),
+            Some(custom_dir.path()),
+        )
+        .await;
+        assert_eq!(
+            (
+                summary.total_tokens,
+                summary.total_messages,
+                summary.total_sessions
+            ),
+            (11_807, 13, 7)
+        );
+        assert_eq!(
+            ranking(&summary),
+            vec![
+                (PROJECT_P.to_string(), 6, 11, 11_792),
+                (PROJECT_Q.to_string(), 1, 2, 15),
+            ]
+        );
+        assert_eq!(summary.total_projects, 2);
+    }
+
+    #[tokio::test]
+    #[serial]
+    /// The global summary takes the name from the folder a file was listed
+    /// under. A project folder named `projects` tells the two apart: read from
+    /// the path, its subagent would be named after the session folder.
+    async fn test_global_summary_names_files_after_the_listed_folder() {
+        let _home = crate::test_utils::SandboxHome::new();
+        let temp_dir = TempDir::new().expect("temp dir");
+        let project = temp_dir.path().join("projects").join("projects");
+        write_transcript(
+            &project.join(format!("{SESSION_P}.jsonl")),
+            &two_rows("s", (200, 20), (300, 30), false),
+        );
+        write_transcript(
+            &project
+                .join(SESSION_P)
+                .join("subagents")
+                .join("agent-a.jsonl"),
+            &two_rows("a", (1000, 100), (2000, 200), true),
+        );
+
+        // The whole range is composed from the cache; the afternoon one takes
+        // the full scan.
+        let ranges = [
+            ((None, None), (2, 4, 3_850)),
+            (
+                (
+                    Some("2025-02-02T12:00:00Z"),
+                    Some("2025-02-02T23:59:59.999Z"),
+                ),
+                (2, 2, 2_530),
+            ),
+        ];
+        for (range, (sessions, messages, tokens)) in ranges {
+            let summary =
+                nested_global_summary(temp_dir.path(), "billing_total", range, None).await;
+            assert_eq!(
+                ranking(&summary),
+                vec![("projects".to_string(), sessions, messages, tokens)],
+                "{range:?}"
+            );
+            assert_eq!(summary.total_projects, 1, "{range:?}");
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    /// Transcripts listed on their own (no parent session to fold them into)
+    /// carry the project folder's name, as the project summary does.
+    async fn test_project_token_stats_name_orphan_transcripts_after_the_project() {
+        let _home = crate::test_utils::SandboxHome::new();
+        let temp_dir = TempDir::new().expect("temp dir");
+        write_nested_projects(temp_dir.path());
+        let project = temp_dir.path().join("projects").join(PROJECT_P);
+        let orphan = project.join(ORPHAN_P).join("subagents");
+        write_transcript(
+            &orphan.join("agent-o.jsonl"),
+            &two_rows("o", (60, 6), (70, 7), true),
+        );
+        write_transcript(
+            &orphan.join("workflows").join("wf_2").join("agent-w.jsonl"),
+            &two_rows("w", (80, 8), (90, 9), true),
+        );
+        write_journal(&orphan.join("workflows").join("wf_2").join("journal.jsonl"));
+        let project_path = project.to_string_lossy().to_string();
+
+        // The second pass is served from the cache.
+        for _ in 0..2 {
+            let page = get_project_token_stats(
+                project_path.clone(),
+                Some(0),
+                Some(20),
+                None,
+                None,
+                Some("billing_total".to_string()),
+            )
+            .await
+            .expect("project token stats");
+            let mut items: Vec<(u64, &str)> = page
+                .items
+                .iter()
+                .map(|item| (item.total_tokens, item.project_name.as_str()))
+                .collect();
+            items.sort_unstable();
+            // The session (with its subagents) and the two orphans; the
+            // journals have no messages, so they are not items.
+            assert_eq!(page.total_count, 3);
+            assert_eq!(
+                items,
+                vec![(143, PROJECT_P), (187, PROJECT_P), (11_660, PROJECT_P)]
+            );
+        }
+
+        let summary = get_project_stats_summary(project_path, None, None, None)
+            .await
+            .expect("project summary");
+        assert_eq!(summary.project_name, PROJECT_P);
+    }
+
+    #[tokio::test]
+    #[serial]
+    /// A session path at any depth is named after the folder directly under
+    /// `projects/`.
+    async fn test_session_token_stats_name_nested_paths_after_the_project() {
+        let _home = crate::test_utils::SandboxHome::new();
+        let temp_dir = TempDir::new().expect("temp dir");
+        let files = write_nested_projects(temp_dir.path());
+
+        // Session, subagent and workflow agent.
+        for file in &files[..3] {
+            let stats = get_session_token_stats(
+                file.to_string_lossy().to_string(),
+                None,
+                None,
+                Some("billing_total".to_string()),
+            )
+            .await
+            .expect("session token stats");
+            assert_eq!(stats.project_name, PROJECT_P, "{}", file.display());
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    /// A `projects` folder higher up (say, in the home path) does not win over
+    /// the deeper one that holds the Claude project.
+    async fn test_session_token_stats_use_the_deepest_projects_folder() {
+        let _home = crate::test_utils::SandboxHome::new();
+        let temp_dir = TempDir::new().expect("temp dir");
+        let base = temp_dir
+            .path()
+            .join("projects")
+            .join("someone")
+            .join(".claude");
+        let files = write_nested_projects(&base);
+
+        let stats = get_session_token_stats(
+            files[2].to_string_lossy().to_string(),
+            None,
+            None,
+            Some("billing_total".to_string()),
+        )
+        .await
+        .expect("session token stats");
+        assert_eq!(stats.project_name, PROJECT_P);
+    }
+
+    #[test]
+    fn claude_session_project_name_reads_the_folder_under_projects() {
+        let cases = [
+            // Every transcript shape, at its depth.
+            ("/h/.claude/projects/p/s.jsonl", "p"),
+            ("/h/.claude/projects/p/s/subagents/agent-1.jsonl", "p"),
+            (
+                "/h/.claude/projects/p/s/subagents/workflows/wf_1/agent-1.jsonl",
+                "p",
+            ),
+            (
+                "/h/.claude/projects/p/s/subagents/workflows/wf_1/journal.jsonl",
+                "p",
+            ),
+            // The deepest `projects/` wins.
+            ("/projects/me/.claude/projects/p/s/subagents/a.jsonl", "p"),
+            // A project folder named `projects`: right for its own sessions,
+            // but a nested transcript reads as the session folder (the known
+            // limitation of going by the path alone).
+            ("/h/.claude/projects/projects/s.jsonl", "projects"),
+            (
+                "/h/.claude/projects/projects/s/subagents/agent-1.jsonl",
+                "s",
+            ),
+            // `Projects` is not `projects`.
+            (
+                "/h/.claude/Projects/p/s/subagents/agent-1.jsonl",
+                "subagents",
+            ),
+            // No `projects/` above the file's folder: the parent names it.
+            ("/h/archive/folder/s.jsonl", "folder"),
+            ("/h/projects/s.jsonl", "projects"),
+            ("s.jsonl", "Unknown"),
+        ];
+        for (path, name) in cases {
+            assert_eq!(claude_session_project_name(Path::new(path)), name, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    /// Outside any `projects/` folder the parent folder still names the
+    /// session.
+    async fn test_session_token_stats_fall_back_to_the_parent_folder() {
+        let _home = crate::test_utils::SandboxHome::new();
+        let temp_dir = TempDir::new().expect("temp dir");
+        // With the temp dir itself under a `projects/` folder there is no
+        // "outside" to test; the literal-path unit test still covers the rule.
+        if temp_dir.path().ancestors().any(|dir| {
+            dir.parent()
+                .and_then(Path::file_name)
+                .is_some_and(|name| name == "projects")
+        }) {
+            eprintln!("skipped: the temp dir is under a `projects` folder");
+            return;
+        }
+        let file = temp_dir
+            .path()
+            .join("outer")
+            .join("loose-folder")
+            .join("session.jsonl");
+        write_transcript(&file, &two_rows("l", (1, 1), (2, 2), false));
+
+        let stats = get_session_token_stats(
+            file.to_string_lossy().to_string(),
+            None,
+            None,
+            Some("billing_total".to_string()),
+        )
+        .await
+        .expect("session token stats");
+        assert_eq!(stats.project_name, "loose-folder");
     }
 }

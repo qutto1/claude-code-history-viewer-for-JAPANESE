@@ -232,15 +232,33 @@ fn build_matcher(query: &str) -> AhoCorasick {
         .expect("single-pattern AhoCorasick build should never fail")
 }
 
-/// Extract project name from file path
-/// Path format: ~/.claude/projects/[project-name]/[session-file].jsonl
+/// The project a session file belongs to: the directory directly under
+/// `projects_root` (`~/.claude/projects`) that holds it, however deep.
+/// That folder name is what a project filter sends.
 ///
-/// Subagent transcripts live two levels deeper, at
-/// `projects/[project-name]/[session-id]/subagents/agent-*.jsonl`. Taking the
-/// parent directory there would label every subagent hit "subagents", which
-/// groups them under a project that does not exist and keeps a project filter
-/// from ever matching them.
-fn extract_project_name(file_path: &PathBuf) -> Option<String> {
+/// Sessions lie at `[project-name]/[session-id].jsonl`; subagent and workflow
+/// transcripts lie further down, under
+/// `[project-name]/[session-id]/subagents/`. Naming them after a nearby
+/// directory ("subagents", a workflow run) would group them under a project
+/// that does not exist and keep a project filter from ever matching them.
+///
+/// A file lying directly in `projects_root` belongs to no project. A path
+/// that does not start with `projects_root` (the walk never yields one) is
+/// named after its parent directory instead.
+fn extract_project_name(projects_root: &Path, file_path: &Path) -> Option<String> {
+    let Ok(relative) = file_path.strip_prefix(projects_root) else {
+        return project_name_from_parent(file_path);
+    };
+    let mut components = relative.components();
+    let first = components.next()?;
+    // Nothing after the first component: it is the file itself.
+    components.next()?;
+    first.as_os_str().to_str().map(str::to_string)
+}
+
+/// The parent directory's name, or for a `[session-id]/subagents/` file the
+/// directory above the session's.
+fn project_name_from_parent(file_path: &Path) -> Option<String> {
     let mut dir = file_path.parent()?;
     if dir.file_name().is_some_and(|name| name == "subagents") {
         dir = dir.parent()?.parent()?;
@@ -264,12 +282,13 @@ fn extract_project_name(file_path: &PathBuf) -> Option<String> {
 /// never be taken for a complete one.
 #[allow(unsafe_code)] // Required for mmap performance optimization
 fn search_in_file(
+    projects_root: &Path,
     file_path: &PathBuf,
     matcher: &AhoCorasick,
     fallback_timestamp: Option<SystemTime>,
     cancel: Option<&SearchCancelToken>,
 ) -> Option<Vec<ClaudeMessage>> {
-    let project_name = extract_project_name(file_path);
+    let project_name = extract_project_name(projects_root, file_path);
     let fallback_timestamp =
         fallback_timestamp.map(|mtime| DateTime::<Utc>::from(mtime).to_rfc3339());
 
@@ -604,9 +623,10 @@ fn date_range_bounds(filters: &serde_json::Value) -> Option<DateRangeBounds> {
 /// message to the filtered result, so they are not read at all.
 ///
 /// It reads the filters through the same helpers as `matches_filters`:
-/// - project: every message of a file carries `extract_project_name(path)`
-///   (set in `search_in_file`), so a file outside the selection is filtered
-///   out row by row anyway.
+/// - project: every message of a file carries
+///   `extract_project_name(projects_root, path)` (set in `search_in_file`
+///   from the same root), so a file outside the selection is filtered out row
+///   by row anyway.
 /// - date: a file written more than `PREFILTER_MTIME_MARGIN_HOURS` before the
 ///   range starts has no message in it (rows without a timestamp take that
 ///   same mtime). An unparsable end rejects every message regardless.
@@ -614,12 +634,13 @@ fn date_range_bounds(filters: &serde_json::Value) -> Option<DateRangeBounds> {
 /// A file whose signature or mtime is unknown is always read. A skipped file
 /// keeps no cache entry, so a later, wider search reads it.
 struct ScanPrefilter<'a> {
+    projects_root: &'a Path,
     projects: Option<Vec<&'a str>>,
     written_before_cutoff: Option<SystemTime>,
 }
 
 impl<'a> ScanPrefilter<'a> {
-    fn new(filters: &'a serde_json::Value) -> Self {
+    fn new(projects_root: &'a Path, filters: &'a serde_json::Value) -> Self {
         let written_before_cutoff = date_range_bounds(filters)
             .and_then(|(start, _)| start)
             .and_then(|start| {
@@ -627,18 +648,19 @@ impl<'a> ScanPrefilter<'a> {
             })
             .map(SystemTime::from);
         Self {
+            projects_root,
             projects: selected_projects(filters),
             written_before_cutoff,
         }
     }
 
-    fn excludes(&self, path: &PathBuf, signature: Option<FileSignature>) -> bool {
+    fn excludes(&self, path: &Path, signature: Option<FileSignature>) -> bool {
         let Some(mtime) = signature.and_then(|signature| signature.mtime) else {
             return false;
         };
         if let Some(projects) = &self.projects {
-            let in_selection =
-                extract_project_name(path).is_some_and(|name| projects.contains(&name.as_str()));
+            let in_selection = extract_project_name(self.projects_root, path)
+                .is_some_and(|name| projects.contains(&name.as_str()));
             if !in_selection {
                 return true;
             }
@@ -787,7 +809,7 @@ fn search_messages_blocking(
 
     // Uncached files the filters rule out are not read: their slot stays
     // empty, so they add nothing to the result and nothing to the cache.
-    let prefilter = ScanPrefilter::new(&filters);
+    let prefilter = ScanPrefilter::new(&projects_path, &filters);
     let scan_indices: Vec<usize> = per_file
         .iter()
         .enumerate()
@@ -827,8 +849,14 @@ fn search_messages_blocking(
             #[cfg(test)]
             note_scan(&file_paths[idx]);
             let fallback_timestamp = per_file[idx].0.and_then(|signature| signature.mtime);
-            search_in_file(&file_paths[idx], &matcher, fallback_timestamp, cancel)
-                .map(|matches| (idx, Arc::new(matches)))
+            search_in_file(
+                &projects_path,
+                &file_paths[idx],
+                &matcher,
+                fallback_timestamp,
+                cancel,
+            )
+            .map(|matches| (idx, Arc::new(matches)))
         })
         .collect();
     let Some(scanned) = scanned else {
@@ -1010,32 +1038,101 @@ mod tests {
     use std::sync::atomic::AtomicBool;
     use tempfile::TempDir;
 
+    /// `extract_project_name` of the file at `relative` under a `projects/`
+    /// root.
+    fn name_under_projects(relative: &str) -> Option<String> {
+        let root = PathBuf::from("/home/u/.claude/projects");
+        extract_project_name(&root, &root.join(relative))
+    }
+
     #[test]
     fn test_extract_project_name_uses_the_project_directory() {
-        let session = PathBuf::from("/home/u/.claude/projects/-work-proj/abc.jsonl");
-        assert_eq!(
-            extract_project_name(&session).as_deref(),
-            Some("-work-proj")
-        );
+        // Sessions, subagent transcripts, and workflow transcripts with their
+        // journal: the project is the directory directly under `projects/`.
+        for relative in [
+            "-work-proj/abc.jsonl",
+            "-work-proj/abc/subagents/agent-1.jsonl",
+            "-work-proj/abc/subagents/workflows/wf_run1/agent-1.jsonl",
+            "-work-proj/abc/subagents/workflows/wf_run1/journal.jsonl",
+        ] {
+            assert_eq!(
+                name_under_projects(relative).as_deref(),
+                Some("-work-proj"),
+                "{relative}"
+            );
+        }
+    }
 
-        // Subagent transcripts sit under `<project>/<session>/subagents/`; the
-        // project is still the directory directly under `projects/`.
-        let subagent =
-            PathBuf::from("/home/u/.claude/projects/-work-proj/abc/subagents/agent-1.jsonl");
+    #[test]
+    fn test_extract_project_name_goes_by_position_not_by_directory_name() {
+        // A project may itself be called `subagents`.
         assert_eq!(
-            extract_project_name(&subagent).as_deref(),
+            name_under_projects("subagents/abc.jsonl").as_deref(),
+            Some("subagents")
+        );
+        // The archive-compatible layout, without a session directory.
+        assert_eq!(
+            name_under_projects("-work-proj/subagents/abc/x.jsonl").as_deref(),
             Some("-work-proj")
         );
     }
 
     #[test]
-    fn test_extract_project_name_keeps_a_plain_directory_named_like_a_session() {
-        // Only a directory literally named `subagents` is treated as the
-        // subagent layout.
-        let nested = PathBuf::from("/home/u/.claude/projects/-work-proj/subagents-notes/x.jsonl");
+    fn test_extract_project_name_ignores_directories_below_the_project() {
         assert_eq!(
-            extract_project_name(&nested).as_deref(),
-            Some("subagents-notes")
+            name_under_projects("-work-proj/subagents-notes/x.jsonl").as_deref(),
+            Some("-work-proj")
+        );
+    }
+
+    #[test]
+    fn test_extract_project_name_gives_no_project_to_a_file_directly_in_projects() {
+        assert_eq!(name_under_projects("x.jsonl"), None);
+    }
+
+    #[test]
+    fn test_extract_project_name_falls_back_to_the_parent_directory_outside_the_root() {
+        let root = PathBuf::from("/home/u/.claude/projects");
+        for (path, expected) in [
+            ("/elsewhere/-work-proj/abc.jsonl", "-work-proj"),
+            (
+                "/elsewhere/-work-proj/abc/subagents/agent-1.jsonl",
+                "-work-proj",
+            ),
+            (
+                "/elsewhere/-work-proj/subagents-notes/x.jsonl",
+                "subagents-notes",
+            ),
+        ] {
+            assert_eq!(
+                extract_project_name(&root, Path::new(path)).as_deref(),
+                Some(expected),
+                "{path}"
+            );
+        }
+    }
+
+    // Both use a workflow path: the parent-directory fallback would name it
+    // after the run directory, so only a matching root yields the project.
+    #[test]
+    fn test_extract_project_name_under_a_relative_root() {
+        let root = Path::new(".claude/projects");
+        let file = root.join("-work-proj/abc/subagents/workflows/wf_run1/agent-1.jsonl");
+        assert_eq!(
+            extract_project_name(root, &file).as_deref(),
+            Some("-work-proj")
+        );
+    }
+
+    /// A WSL distro is searched through a UNC root.
+    #[cfg(windows)]
+    #[test]
+    fn test_extract_project_name_under_a_unc_root() {
+        let root = Path::new(r"\\wsl.localhost\Ubuntu\home\u\.claude").join("projects");
+        let file = root.join(r"-work-proj\abc\subagents\workflows\wf_run1\agent-1.jsonl");
+        assert_eq!(
+            extract_project_name(&root, &file).as_deref(),
+            Some("-work-proj")
         );
     }
 
@@ -1910,6 +2007,214 @@ mod tests {
             0,
             "older than start - 1h is skipped"
         );
+    }
+
+    // ─── Project names below the project directory ──────────────────────────
+
+    /// A workflow subagent transcript and its journal in `-work-proj`, and a
+    /// plain session in `-other-proj`. Returns (`temp_dir`, `agent`,
+    /// `journal`, `other`).
+    fn workflow_fixture(query_marker: &str) -> (TempDir, PathBuf, PathBuf, PathBuf) {
+        let temp_dir = TempDir::new().unwrap();
+        let projects = temp_dir.path().join("projects");
+        let run_dir = projects
+            .join("-work-proj")
+            .join("sess-1")
+            .join("subagents")
+            .join("workflows")
+            .join("wf_run1");
+        let agent = write_session(
+            &run_dir,
+            "agent-1.jsonl",
+            &[create_sample_user_message(
+                "wf1",
+                "sess-1",
+                &format!("{query_marker} in a workflow"),
+            )],
+        );
+        // A journal row has no `message`, so it never matches.
+        let journal = write_session(
+            &run_dir,
+            "journal.jsonl",
+            &[format!(r#"{{"type":"started","key":"{query_marker}"}}"#)],
+        );
+        let other = write_session(
+            &projects.join("-other-proj"),
+            "s2.jsonl",
+            &[create_sample_user_message(
+                "o1",
+                "s2",
+                &format!("{query_marker} elsewhere"),
+            )],
+        );
+        (temp_dir, agent, journal, other)
+    }
+
+    #[tokio::test]
+    async fn test_search_labels_workflow_hits_with_their_project() {
+        let (temp_dir, agent, journal, other) = workflow_fixture("wfProbe11");
+
+        let results = search_with(
+            &temp_dir,
+            "wfProbe11",
+            serde_json::json!({ "projects": ["-work-proj"] }),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            uuids(&results),
+            ["wf1"],
+            "the project filter must reach workflow hits"
+        );
+        assert_eq!(results[0].project_name.as_deref(), Some("-work-proj"));
+        assert_eq!(
+            (
+                test_scan_count(&agent),
+                test_scan_count(&journal),
+                test_scan_count(&other)
+            ),
+            (1, 1, 0)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_prefilter_never_reads_workflow_files_of_another_project() {
+        let (temp_dir, agent, journal, other) = workflow_fixture("wfProbe12");
+
+        // Cold, so a file with no scan was skipped, not served from memory.
+        let results = search_with(
+            &temp_dir,
+            "wfProbe12",
+            serde_json::json!({ "projects": ["-other-proj"] }),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(uuids(&results), ["o1"]);
+        assert_eq!(
+            (
+                test_scan_count(&agent),
+                test_scan_count(&journal),
+                test_scan_count(&other)
+            ),
+            (0, 0, 1),
+            "workflow files of an unselected project must not be read"
+        );
+    }
+
+    /// A workflow run directory is not a project: selecting it reads nothing.
+    #[tokio::test]
+    async fn test_search_does_not_treat_a_workflow_run_directory_as_a_project() {
+        let (temp_dir, agent, journal, other) = workflow_fixture("wfProbe13");
+
+        let results = search_with(
+            &temp_dir,
+            "wfProbe13",
+            serde_json::json!({ "projects": ["wf_run1"] }),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(results.is_empty(), "got {:?}", uuids(&results));
+        assert_eq!(
+            (
+                test_scan_count(&agent),
+                test_scan_count(&journal),
+                test_scan_count(&other)
+            ),
+            (0, 0, 0)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_workflow_project_filter_is_the_same_cold_and_after_an_unfiltered_search() {
+        let (temp_dir, agent, _journal, _other) = workflow_fixture("wfProbe14");
+        let filters = serde_json::json!({ "projects": ["-work-proj"] });
+
+        let cold = search_with(&temp_dir, "wfProbe14", filters.clone(), None)
+            .await
+            .unwrap();
+        assert_eq!(uuids(&cold), ["wf1"]);
+
+        clear_search_cache_for_test();
+        let unfiltered = search_with(&temp_dir, "wfProbe14", serde_json::json!({}), None)
+            .await
+            .unwrap();
+        assert_eq!(uuids(&unfiltered), ["o1", "wf1"]);
+        let warm = search_with(&temp_dir, "wfProbe14", filters, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            test_scan_count(&agent),
+            2,
+            "the last search is served from the remembered matches"
+        );
+        assert_eq!(
+            serde_json::to_value(&cold).unwrap(),
+            serde_json::to_value(&warm).unwrap(),
+            "the pre-filtered cold search must equal the filtered warm search"
+        );
+    }
+
+    /// The walk hands out paths that start with the root as it was passed in,
+    /// so an unnormalized root names the same projects.
+    #[tokio::test]
+    async fn test_search_names_projects_under_an_unnormalized_root() {
+        let (temp_dir, _agent, _journal, _other) = workflow_fixture("wfProbe15");
+        let root = temp_dir.path().to_string_lossy().to_string();
+
+        for claude_path in [format!("{root}/"), format!("{root}/./")] {
+            let results = search_messages(
+                claude_path.clone(),
+                "wfProbe15".to_string(),
+                serde_json::json!({ "projects": ["-work-proj"] }),
+                Some(10),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(uuids(&results), ["wf1"], "{claude_path}");
+            assert_eq!(results[0].project_name.as_deref(), Some("-work-proj"));
+        }
+    }
+
+    /// A file lying directly in `projects/` is searched, but belongs to no
+    /// project: no project selection (not even "projects") matches it.
+    #[tokio::test]
+    async fn test_search_file_directly_in_projects_belongs_to_no_project() {
+        let temp_dir = TempDir::new().unwrap();
+        let projects = temp_dir.path().join("projects");
+        let loose = write_session(
+            &projects,
+            "loose.jsonl",
+            &[create_sample_user_message("l1", "loose", "looseProbe16")],
+        );
+        let selected = serde_json::json!({ "projects": ["projects"] });
+
+        let cold = search_with(&temp_dir, "looseProbe16", selected.clone(), None)
+            .await
+            .unwrap();
+        assert!(cold.is_empty(), "got {:?}", uuids(&cold));
+        assert_eq!(test_scan_count(&loose), 0);
+
+        let unfiltered = search_with(&temp_dir, "looseProbe16", serde_json::json!({}), None)
+            .await
+            .unwrap();
+        assert_eq!(uuids(&unfiltered), ["l1"]);
+        assert_eq!(unfiltered[0].project_name, None);
+
+        let warm = search_with(&temp_dir, "looseProbe16", selected, None)
+            .await
+            .unwrap();
+        assert!(warm.is_empty(), "got {:?}", uuids(&warm));
+        assert_eq!(test_scan_count(&loose), 1);
     }
 
     // ─── 古い検索の中断 ─────────────────────────────────────────────────────

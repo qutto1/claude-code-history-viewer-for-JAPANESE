@@ -1439,9 +1439,14 @@ mod tests {
                         panic!("day-aligned filter must compose from daily buckets")
                     }
                 };
-                let scanned =
-                    scan_session_file_for_global_stats(&file, mode, s.as_ref(), e.as_ref())
-                        .expect("scan produces stats");
+                let scanned = scan_session_file_for_global_stats(
+                    &file,
+                    &claude_session_project_name(&file),
+                    mode,
+                    s.as_ref(),
+                    e.as_ref(),
+                )
+                .expect("scan produces stats");
                 assert_global_stats_eq(&composed, &scanned);
             }
         }
@@ -1546,8 +1551,14 @@ mod tests {
                 Composed::Ready(stats) => stats,
                 Composed::NeedsFullScan => panic!("unfiltered compose must be ready"),
             };
-        let scanned_global =
-            scan_session_file_for_global_stats(&file, mode, None, None).expect("global scan");
+        let scanned_global = scan_session_file_for_global_stats(
+            &file,
+            &claude_session_project_name(&file),
+            mode,
+            None,
+            None,
+        )
+        .expect("global scan");
         assert_eq!(scanned_global.token_distribution.output, 95 + 7);
         assert_eq!(scanned_global.token_distribution.input, 100 + 20);
         assert_global_stats_eq(&composed_global, &scanned_global);
@@ -1728,8 +1739,14 @@ mod tests {
                     Composed::Ready(stats) => stats,
                     Composed::NeedsFullScan => panic!("unfiltered composition is always exact"),
                 };
-                let scanned = scan_session_file_for_global_stats(&file, mode, None, None)
-                    .expect("scan produces stats");
+                let scanned = scan_session_file_for_global_stats(
+                    &file,
+                    &claude_session_project_name(&file),
+                    mode,
+                    None,
+                    None,
+                )
+                .expect("scan produces stats");
                 assert_global_stats_eq(&composed, &scanned);
             } else {
                 let aggregate =
@@ -1743,9 +1760,10 @@ mod tests {
 
         // The wrapper's filtered result equals the scan: usage counted once,
         // attributed to the first in-range row (the day-2 duplicate).
-        let wrapped = process_session_file_for_global_stats(&file, mode, Some(&s), Some(&e))
+        let name = claude_session_project_name(&file);
+        let wrapped = process_session_file_for_global_stats(&file, &name, mode, Some(&s), Some(&e))
             .expect("wrapper result");
-        let scanned = scan_session_file_for_global_stats(&file, mode, Some(&s), Some(&e))
+        let scanned = scan_session_file_for_global_stats(&file, &name, mode, Some(&s), Some(&e))
             .expect("scan result");
         assert_global_stats_eq(&wrapped, &scanned);
         assert_eq!(wrapped.total_tokens, 110);
@@ -1793,19 +1811,20 @@ mod tests {
 
         let mode = StatsMode::BillingTotal;
         // Warm the cache with an unfiltered call.
-        process_session_file_for_global_stats(&file, mode, None, None).expect("warm call");
+        let name = claude_session_project_name(&file);
+        process_session_file_for_global_stats(&file, &name, mode, None, None).expect("warm call");
         assert_eq!(test_build_count(&file), 1);
 
         let s = dt("2025-03-02T00:00:00Z");
         let e = dt("2025-03-02T23:59:59.999Z");
-        let cached = process_session_file_for_global_stats(&file, mode, Some(&s), Some(&e))
+        let cached = process_session_file_for_global_stats(&file, &name, mode, Some(&s), Some(&e))
             .expect("cached filtered result");
         assert_eq!(
             test_build_count(&file),
             1,
             "filtered call must not re-parse"
         );
-        let scanned = scan_session_file_for_global_stats(&file, mode, Some(&s), Some(&e))
+        let scanned = scan_session_file_for_global_stats(&file, &name, mode, Some(&s), Some(&e))
             .expect("cold filtered result");
         assert_global_stats_eq(&cached, &scanned);
         // Day 2 of the fixture: skill row (33) + sidechain row (1100).
